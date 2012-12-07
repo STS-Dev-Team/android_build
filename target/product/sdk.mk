@@ -147,7 +147,7 @@ $(call inherit-product-if-exists, frameworks/base/data/keyboards/keyboards.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core.mk)
 
 # Overrides
-PRODUCT_BRAND := generic
+PRODUCT_BRAND := motorola
 PRODUCT_NAME := sdk
 PRODUCT_DEVICE := generic
 
@@ -224,3 +224,6 @@ PRODUCT_LOCALES = \
 -include external/svox/pico/lang/PicoLangEsEsInSystem.mk
 -include external/svox/pico/lang/PicoLangFrFrInSystem.mk
 -include external/svox/pico/lang/PicoLangItItInSystem.mk
+
+# Product Packages Support for User and Eng Builds
+-include vendor/moto/common/common-phone.mk

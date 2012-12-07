@@ -198,6 +198,11 @@ ifneq ($(package_expected_intermediates_COMMON),$(intermediates.COMMON))
   $(error $(LOCAL_MODULE): internal error: expected intermediates.COMMON "$(package_expected_intermediates_COMMON)" != intermediates.COMMON "$(intermediates.COMMON)")
 endif
 
+# Motorola - BEGIN - Frank Liu - 11/11/2009
+$(R_file_stamp): PRIVATE_SOURCE_OUTPUT := \
+			$(LOCAL_PATH)/res/values/public.xml
+# Motorola - END - Frank Liu - 11/11/2009
+
 $(R_file_stamp): PRIVATE_RESOURCE_PUBLICS_OUTPUT := \
 			$(intermediates.COMMON)/public_resources.xml
 $(R_file_stamp): PRIVATE_PROGUARD_OPTIONS_FILE := $(proguard_options_file)
@@ -227,6 +232,13 @@ ifdef LOCAL_EXPORT_PACKAGE_RESOURCES
 # other packages can use to build their own PRODUCT-agnostic R.java (etc.)
 # files.
 resource_export_package := $(intermediates.COMMON)/package-export.apk
+# BEGIN MOT ICS UPMERGE, a18772, 11/22/2011
+# Motorola, bkdp84, 11/06/09, for motorola resources support
+# Ensure framework-res is built before building moto-res.
+ifeq ($(LOCAL_BUILDING_MOTO_RES), true)
+$(resource_export_package): $(call intermediates-dir-for,APPS,framework-res,,COMMON)/src/R.stamp
+endif
+# END MOT ICS UPMERGE
 $(R_file_stamp): $(resource_export_package)
 
 # add-assets-to-package looks at PRODUCT_AAPT_CONFIG, but this target
@@ -238,6 +250,32 @@ $(resource_export_package): $(all_res_assets) $(full_android_manifest) $(RenderS
 	$(create-empty-package)
 	$(add-assets-to-package)
 endif
+
+# Motorola - BEGIN - Frank Liu - 11/11/2009
+# This is only used to build blur-res projects. We have to generate
+# public-resources.xml first, and copy this file back to source code.
+ifdef BLUR_RESOURCE
+# Put this module's resources into a PRODUCT-agnositc package that
+# other packages can use to build their own PRODUCT-agnostic R.java (etc.)
+# files.
+resource_export_package := $(intermediates.COMMON)/package-export.apk
+$(resource_export_package): $(call intermediates-dir-for,APPS,framework-res,,COMMON)/src/R.stamp \
+    $(call intermediates-dir-for,APPS,moto-res,,COMMON)/src/R.stamp
+$(R_file_stamp): $(resource_export_package)
+
+# add-assets-to-package looks at PRODUCT_AAPT_CONFIG, but this target
+# can't know anything about PRODUCT.  Clear it out just for this target.
+$(resource_export_package): PRODUCT_AAPT_CONFIG :=
+$(resource_export_package): $(all_res_assets) $(full_android_manifest) $(AAPT)
+	@echo "target Export Resources: $(PRIVATE_MODULE) ($@)"
+	$(create-empty-package)
+	$(create-resource-java-files)
+	$(hide) $(ACP) -fpt $(PRIVATE_RESOURCE_PUBLICS_OUTPUT) $(PRIVATE_SOURCE_OUTPUT)
+	$(add-assets-to-package)
+	$(hide) rm -f $(PRIVATE_SOURCE_OUTPUT)
+endif
+# Motorola - END - Frank Liu - 11/11/2009
+
 
 # Other modules should depend on the BUILT module if
 # they want to use this module's R.java file.
@@ -266,18 +304,36 @@ ifneq ($(filter-out current,$(LOCAL_SDK_RES_VERSION)),)
 framework_res_package_export := \
     $(HISTORICAL_SDK_VERSIONS_ROOT)/$(LOCAL_SDK_RES_VERSION)/android.jar
 framework_res_package_export_deps := $(framework_res_package_export)
+moto_res_package_export :=
+moto_res_package_export_deps :=
 else # LOCAL_SDK_RES_VERSION
 framework_res_package_export := \
-    $(call intermediates-dir-for,APPS,framework-res,,COMMON)/package-export.apk
+	$(call intermediates-dir-for,APPS,framework-res,,COMMON)/package-export.apk
+# BEGIN MOT ICS UPMERGE, a18772, 11/22/2011
+# LOCAL_PROJ_DEPS and LOCAL_AAPT_INCLUDES are ONLY used by BLUR Apps now.
+# Need to investigate if LOCAL_AAPT_FLAGS could be used to replace LOCAL_AAPT_INCLUDES
+# Motorola, bkdp84, 11/06/09, for motorola resources support
+# Add moto-res as a dependency for other packages (like framework-res is)
+ifeq ($(LOCAL_BUILDING_MOTO_RES), true)
+moto_res_package_export :=
+moto_res_package_export_deps :=
+else
+moto_res_package_export := \
+	$(call intermediates-dir-for,APPS,moto-res,,COMMON)/package-export.apk
+moto_res_package_export_deps := \
+	$(dir $(moto_res_package_export))src/R.stamp
+endif # LOCAL_BUILDING_MOTO_RES
+# END MOT ICS UPMERGE, a18772, 11/22/2011
+
 # We can't depend directly on the export.apk file; it won't get its
 # PRIVATE_ vars set up correctly if we do.  Instead, depend on the
 # corresponding R.stamp file, which lists the export.apk as a dependency.
 framework_res_package_export_deps := \
-    $(dir $(framework_res_package_export))src/R.stamp
+	$(dir $(framework_res_package_export))src/R.stamp
 endif # LOCAL_SDK_RES_VERSION
-$(R_file_stamp): $(framework_res_package_export_deps)
+$(R_file_stamp): $(framework_res_package_export_deps) $(moto_res_package_export_deps) $(LOCAL_PROJ_DEPS)
 $(LOCAL_INTERMEDIATE_TARGETS): \
-    PRIVATE_AAPT_INCLUDES := $(framework_res_package_export)
+	PRIVATE_AAPT_INCLUDES := $(framework_res_package_export) $(moto_res_package_export) $(LOCAL_AAPT_INCLUDES)
 endif # LOCAL_NO_STANDARD_LIBRARIES
 
 ifneq ($(full_classes_jar),)

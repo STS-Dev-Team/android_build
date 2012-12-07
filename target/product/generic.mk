@@ -24,3 +24,22 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/telephony.mk)
 PRODUCT_BRAND := generic
 PRODUCT_DEVICE := generic
 PRODUCT_NAME := generic
+
+# BEGIN MOT GB UPMERGE, a18772, 01/19/2011
+# BEGIN Motorola, pwn687.   Update the supported locale IKMAIN-502
+PRODUCT_LOCALES := \
+        en_US \
+        es_US
+# END Motorola
+
+# BEGIN Motorola, jnp847, Feb-7-2010, IKMAP-5000
+# Product Packages Support for User and Eng Builds
+-include vendor/moto/common/common-phone.mk
+# END IKMAP-5000
+
+# BEGIN IKSTABLETWO-2308
+ifeq ($(TARGET_PRODUCT),generic)
+  PRODUCT_LOCALES += ldpi mdpi hdpi xhdpi
+endif 
+# END IKSTABLETWO-2308
+# END MOT GB UPMERGE, a18772, 01/19/2010

@@ -63,7 +63,13 @@ INTERNAL_CLEAN_BUILD_VERSION := 6
 # NEWER CLEAN STEPS MUST BE AT THE END OF THE LIST
 # ************************************************
 
+ifeq ($(MOT_BUILD_OPTIMIZE),1)
+subdir_cleanspecs := \
+    $(shell build/tools/findleaves_motorola.sh --prune=out --prune=.repo --prune=.git . CleanSpec.mk)
+else
 subdir_cleanspecs := \
     $(shell build/tools/findleaves.py --prune=out --prune=.repo --prune=.git . CleanSpec.mk)
+endif
+
 include $(subdir_cleanspecs)
 subdir_cleanspecs :=

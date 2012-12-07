@@ -18,7 +18,12 @@
 addon_name := $(strip $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_SDK_ADDON_NAME))
 ifneq ($(addon_name),)
 
-addon_dir_leaf := $(addon_name)-$(FILE_NAME_TAG)-$(INTERNAL_SDK_HOST_OS_NAME)
+# BEGIN MOTOROLA: IKMAIN-29335: Replace hyphen prepending FILE_NAME_TAG
+# by underscore.
+# Hyphen cannot be used before a number else ant build using add-ons
+# path fails in generating the mk file.
+addon_dir_leaf := $(addon_name)_$(FILE_NAME_TAG)-$(INTERNAL_SDK_HOST_OS_NAME)
+# END MOTOROLA: IKMAIN-29335
 
 intermediates := $(HOST_OUT_INTERMEDIATES)/SDK_ADDON/$(addon_name)_intermediates
 full_target := $(HOST_OUT_SDK_ADDON)/$(addon_dir_leaf).zip
@@ -37,6 +42,13 @@ $(call stub-addon-jar-file,$(1)): $(1) | mkstubs
 	$(hide) java -jar $(call module-installed-files,mkstubs) $(if $(hide),,--v) \
 		"$$<" "$$@" @$(PRODUCT_SDK_ADDON_STUB_DEFS)
 endef
+
+# BEGIN MOTOROLA: IKPHOENIX-141: Generate full SDK documentation for the sdk-addon
+# add as many custom steps as necessary for individual addons below
+define custom-doc-step
+    vendor/moto/mmi_apps_sdk/tools/bin/build_sdk_docs.sh -i -t $(addon_name) -o $(PRIVATE_STAGING_DIR)/docs/core
+endef
+# END MOTOROLA: IKPHOENIX-141
 
 # Files that are built and then copied into the sdk-addon
 ifneq ($(strip $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_SDK_ADDON_COPY_MODULES)),)
@@ -78,6 +90,7 @@ $(full_target): PRIVATE_DOCS_DIRS := $(addprefix $(OUT_DOCS)/, $(doc_modules))
 
 $(full_target): PRIVATE_STAGING_DIR := $(staging)
 
+# BEGIN MOTOROLA: IKPHOENIX-141: Generate full SDK documentation for the sdk-addon
 $(full_target): $(sdk_addon_deps) | $(ACP)
 	@echo Packaging SDK Addon: $@
 	$(hide) mkdir -p $(PRIVATE_STAGING_DIR)/docs
@@ -85,7 +98,9 @@ $(full_target): $(sdk_addon_deps) | $(ACP)
 	    $(ACP) -r $$d $(PRIVATE_STAGING_DIR)/docs ;\
 	  done
 	$(hide) mkdir -p $(dir $@)
+	$(hide) $(call custom-doc-step)
 	$(hide) ( F=$$(pwd)/$@ ; cd $(PRIVATE_STAGING_DIR)/.. && zip -rq $$F * )
+# END MOTOROLA: IKPHOENIX-141
 
 .PHONY: sdk_addon
 sdk_addon: $(full_target)

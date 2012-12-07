@@ -11,13 +11,21 @@ echo "ro.build.version.codename=$PLATFORM_VERSION_CODENAME"
 echo "ro.build.version.release=$PLATFORM_VERSION"
 echo "ro.build.date=`date`"
 echo "ro.build.date.utc=`date +%s`"
-echo "ro.build.type=$TARGET_BUILD_TYPE"
+if [ "$USE_GMS_ALL" = "false" ] ; then
+  echo "ro.build.type=$TARGET_BUILD_TYPE"
+else
+  echo "ro.build.type=usedebug_gms"
+fi
 echo "ro.build.user=$USER"
 echo "ro.build.host=`hostname`"
 echo "ro.build.tags=$BUILD_VERSION_TAGS"
 echo "ro.product.model=$PRODUCT_MODEL"
 echo "ro.product.brand=$PRODUCT_BRAND"
-echo "ro.product.name=$PRODUCT_NAME"
+if [ -n "$TARGET_PRODUCT_NAME" ] ; then
+  echo "ro.product.name=$TARGET_PRODUCT_NAME"
+else
+  echo "ro.product.name=$PRODUCT_NAME"
+fi
 echo "ro.product.device=$TARGET_DEVICE"
 echo "ro.product.board=$TARGET_BOOTLOADER_BOARD_NAME"
 echo "ro.product.cpu.abi=$TARGET_CPU_ABI"
@@ -35,7 +43,11 @@ echo "ro.wifi.channels=$PRODUCT_DEFAULT_WIFI_CHANNELS"
 echo "ro.board.platform=$TARGET_BOARD_PLATFORM"
 
 echo "# ro.build.product is obsolete; use ro.product.device"
-echo "ro.build.product=$TARGET_DEVICE"
+if [ -n "$TARGET_PRODUCT_NAME" ] ; then
+  echo "ro.build.product=$TARGET_PRODUCT_NAME"
+else
+  echo "ro.build.product=$TARGET_DEVICE"
+fi
 
 echo "# Do not try to parse ro.build.description or .fingerprint"
 echo "ro.build.description=$PRIVATE_BUILD_DESC"

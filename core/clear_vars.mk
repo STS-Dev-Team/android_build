@@ -116,6 +116,24 @@ LOCAL_NO_CRT:=
 LOCAL_PROPRIETARY_MODULE:=
 LOCAL_CTS_TEST_PACKAGE:=
 
+# BEGIN MOT GB UPMERGE, a18772, 12/29/2010
+# Enable this to build moto resourses.
+# Motorola, bkdp84, 11/06/09, for motorola resources support
+LOCAL_BUILDING_MOTO_RES :=
+
+# Below variables are used by BLUR apps
+LOCAL_AAPT_INCLUDES:=
+LOCAL_PROJ_DEPS:=
+LOCAL_ROOT_DIR:=
+BLUR_RESOURCE:=
+LOCAL_JAVA_SOURCE_LIST:=
+LOCAL_JAVA_SOURCE_PATH:=
+# END MOT GB UPMERGE, a18772, 12/29/2010
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+LOCAL_DEX_WORKAROUND:=
+# END IKHSS7-2666
+
 # Trim MAKEFILE_LIST so that $(call my-dir) doesn't need to
 # iterate over thousands of entries every time.
 # Leave the current makefile to make sure we don't break anything

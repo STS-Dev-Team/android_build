@@ -52,6 +52,11 @@ TOPDIR :=
 
 BUILD_SYSTEM := $(TOPDIR)build/core
 
+# BEGIN MOT GB UPMERGE, a18772, 12/24/2010
+# Motorola, a19677, create MOT_BUILD_SYSTEM
+MOT_BUILD_SYSTEM := $(TOPDIR)motorola/build
+# END MOT GB UPMERGE, a18772, 12/24/2010
+
 # This is the default target.  It must be the first declared target.
 .PHONY: droid
 DEFAULT_GOAL := droid
@@ -60,6 +65,33 @@ $(DEFAULT_GOAL):
 # Used to force goals to build.  Only use for conditionally defined goals.
 .PHONY: FORCE
 FORCE:
+
+# BEGIN MOT GB UPMERGE, a18772, 12/24/2010
+# start Motorola, mcjw73, 6/25/10
+# define the default build as no google apps and blur apps
+GOOGLE_APPS ?= false
+BLUR_APPS ?= true
+
+# for backward compatibility set the correct values for the PLATFORMBUILD=1 case
+ifeq ($(PLATFORMBUILD),1)
+GOOGLE_APPS := true
+BLUR_APPS := false
+endif
+
+ifeq ($(filter blur_emulator,$(MAKECMDGOALS)),blur_emulator)
+GOOGLE_APPS := false
+BLUR_APPS := true
+endif
+
+ifeq ($(filter blur_sdk,$(MAKECMDGOALS)),blur_sdk)
+GOOGLE_APPS := true
+BLUR_APPS := false
+endif
+
+$(info Setting GOOGLE_APPS=$(GOOGLE_APPS))
+$(info Setting BLUR_APPS=$(BLUR_APPS))
+# end Motorola, mcjw73, 6/25/10
+# END MOT GB UPMERGE, a18772, 12/24/2010
 
 # Targets that provide quick help on the build system.
 include $(BUILD_SYSTEM)/help.mk
@@ -118,6 +150,12 @@ ifneq ($(shell java -version 2>&1 | grep -i openjdk),)
 java_version :=
 endif
 ifeq ($(strip $(java_version)),)
+# Motorola GB-UPMERGE BEGIN, ads047, 12/30
+java_version := $(shell java -version 2>&1 | head -n 1 | grep 'Continuing in 64 bit mode')
+ifneq ($(strip $(java_version)),)
+$(info Warning: $(java_version))
+else
+# Motorola GB-UPMERGE END
 $(info ************************************************************)
 $(info You are attempting to build with the incorrect version)
 $(info of java.)
@@ -129,11 +167,20 @@ $(info Please follow the machine setup instructions at)
 $(info $(space)$(space)$(space)$(space)http://source.android.com/source/download.html)
 $(info ************************************************************)
 $(error stop)
+# Motorola GB-UPMERGE BEGIN, ads047, 12/30
+endif
+# Motorola GB-UPMERGE END
 endif
 
 # Check for the correct version of javac
 javac_version := $(shell javac -version 2>&1 | head -n 1 | grep '[ "]1\.6[\. "$$]')
 ifeq ($(strip $(javac_version)),)
+# Motorola GB-UPMERGE BEGIN, ads047, 12/30
+javac_version := $(shell java -version 2>&1 | head -n 1 | grep 'Continuing in 64 bit mode')
+ifneq ($(strip $(javac_version)),)
+$(info Warning: $(javac_version))
+else
+# Motorola GB-UPMERGE END
 $(info ************************************************************)
 $(info You are attempting to build with the incorrect version)
 $(info of javac.)
@@ -145,6 +192,9 @@ $(info Please follow the machine setup instructions at)
 $(info $(space)$(space)$(space)$(space)http://source.android.com/source/download.html)
 $(info ************************************************************)
 $(error stop)
+# Motorola GB-UPMERGE BEGIN, ads047, 12/30
+endif
+# Motorola GB-UPMERGE END
 endif
 
 $(shell echo 'VERSIONS_CHECKED := $(VERSION_CHECK_SEQUENCE_NUMBER)' \
@@ -177,6 +227,10 @@ include $(BUILD_SYSTEM)/definitions.mk
 
 # Bring in dex_preopt.mk
 include $(BUILD_SYSTEM)/dex_preopt.mk
+
+# BEGIN Motorola, IKMAIN-1827, w0126c, 10/29/2010 / add AP20 support
+-include vendor/nvidia/build/definitions.mk
+# END Motorola, IKMAIN-1827
 
 ifneq ($(filter eng user userdebug tests,$(MAKECMDGOALS)),)
 $(info ***************************************************************)
@@ -212,6 +266,11 @@ is_sdk_build :=
 ifneq ($(filter sdk win_sdk sdk_addon,$(MAKECMDGOALS)),)
 is_sdk_build := true
 endif
+# BEGIN MOT GB UPMERGE, a18772, 12/24/2010
+ifneq ($(filter blur_emulator blur_sdk,$(MAKECMDGOALS)),)
+is_sdk_build := true
+endif
+# END MOT GB UPMERGE, a18772, 12/24/2010
 
 
 ## user/userdebug ##
@@ -270,11 +329,56 @@ endif # !enable_target_debugging
 ## eng ##
 
 ifeq ($(TARGET_BUILD_VARIANT),eng)
-tags_to_install := user debug eng
-  # Don't require the setup wizard on eng builds
-  ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+    tags_to_install := user debug eng
+endif
+
+## set ro.setupwizard.mode based on build_type and ro.mot.setuptype ##
+
+# silent blur
+ifeq (ro.mot.setuptype=2, $(filter ro.mot.setuptype=%,$(ADDITIONAL_BUILD_PROPERTIES)))
+  ifeq ($(TARGET_BUILD_VARIANT),eng)
+    # optional on silent eng builds
+    ifeq (ACG,$(ACGCARR))
+       ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+       $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
+       ro.setupwizard.mode=DISABLED
+    else
+          ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
           $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
           ro.setupwizard.mode=OPTIONAL
+    endif
+  else
+    # not set for silent user builds
+    ifeq (ACG,$(ACGCARR))
+         ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+         $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
+         ro.setupwizard.mode=DISABLED
+    else
+          ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+          $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
+          ro.setupwizard.mode=OPTIONAL
+    endif
+  endif
+else
+  # de-blur (i.e. no blur)
+  ifeq (ro.mot.setuptype=3, $(filter ro.mot.setuptype=%,$(ADDITIONAL_BUILD_PROPERTIES)))
+    ifeq ($(TARGET_BUILD_VARIANT),eng)
+      # optional on silent eng builds
+      ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+            $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
+            ro.setupwizard.mode=OPTIONAL
+    else
+      # not set for silent user builds
+      ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+            $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES)))
+    endif
+  else
+    # normal blur
+    # disabled for all normal builds
+    ADDITIONAL_BUILD_PROPERTIES := $(filter-out ro.setupwizard.mode=%,\
+          $(call collapse-pairs, $(ADDITIONAL_BUILD_PROPERTIES))) \
+          ro.setupwizard.mode=DISABLED
+  endif
 endif
 
 ## tests ##
@@ -493,7 +597,7 @@ endif	# !SDK_ONLY
 
 # Before we go and include all of the module makefiles, stash away
 # the PRODUCT_* values so that later we can verify they are not modified.
-stash_product_vars:=true
+stash_product_vars:=false
 ifeq ($(stash_product_vars),true)
   $(call stash-product-vars, __STASHED)
 endif
@@ -519,11 +623,33 @@ else # ONE_SHOT_MAKEFILE
 #
 # Include all of the makefiles in the system
 #
-
+ifeq ($(MOT_BUILD_OPTIMIZE),1)
+subdir_makefiles := \
+	$(shell build/tools/findleaves_motorola.sh --prune=out --prune=.repo --prune=.git $(subdirs) Android.mk)
+else
 # Can't use first-makefiles-under here because
 # --mindepth=2 makes the prunes not work.
 subdir_makefiles := \
 	$(shell build/tools/findleaves.py --prune=out --prune=.repo --prune=.git $(subdirs) Android.mk)
+endif
+
+# Motorola - BEGIN - mcjw73 - IKMAIN-8663 - 12/14/2010
+# resolve to a valid device directory
+-include vendor/moto/$(TARGET_DEVICE)/filterPackages.mk
+# Motorola - END - mcjw73 - IKMAIN-8663 - 12/14/2010
+
+### TEMP : removing applications that does not compile
+filterPackages += \
+       ./motorola/packages/blur/tools/oauth/Android.mk
+filterPackages += \
+       ./development/samples/Home/Android.mk
+
+subdir_makefiles := $(filter-out $(filterPackages), $(subdir_makefiles))
+ifneq ($(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_PACKAGE_FILTERS),)
+subdir_makefiles := $(filter-out $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_PACKAGE_FILTERS), $(subdir_makefiles))
+endif
+
+# END MOT GB UPMERGE, a18772, 12/27/2010
 
 include $(subdir_makefiles)
 endif # ONE_SHOT_MAKEFILE
@@ -667,9 +793,9 @@ ifdef is_sdk_build
               $(filter-out $(target_gnu_MODULES),$(modules_to_install))
 
   # Ensure every module listed in PRODUCT_PACKAGES gets something installed
-  $(foreach m, $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_PACKAGES), \
-      $(if $(strip $(ALL_MODULES.$(m).INSTALLED)),,\
-          $(error Module '$(m)' in PRODUCT_PACKAGES has nothing to install!)))
+#  $(foreach m, $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_PACKAGES), \
+#      $(if $(strip $(ALL_MODULES.$(m).INSTALLED)),,\
+#          $(error Module '$(m)' in PRODUCT_PACKAGES has nothing to install!)))
 endif
 
 
@@ -807,7 +933,7 @@ else # TARGET_BUILD_APPS
    )
 
 # Building a full system-- the default is to build droidcore
-droid: droidcore dist_files
+droid: droidcore dist_files installed_modules_file
 
 endif # TARGET_BUILD_APPS
 endif # droid in $(MAKECMDGOALS)
@@ -848,6 +974,15 @@ samplecode: $(sample_APKS_COLLECTION)
 	# remove apks that are not intended to be installed.
 	rm -f $(sample_ADDITIONAL_INSTALLED)
 
+# BEGIN MOT GB UPMERGE, a18772, 12/27/2010
+# Motorola, a19677, 10/04/09, create a separate rule to create
+# blur sdk and emulator that contains all the classes in android.jar
+.PHONY: blur_emulator blur_sdk
+blur_emulator blur_sdk: sdk
+	$(hide) echo "Creating Blur Emulator or SDK"
+	$(hide) $(MOT_BUILD_SYSTEM)/tools/expand-sdk.sh $(TARGET_OUT_ROOT)
+# END MOT GB UPMERGE, a18772, 12/27/2010
+
 .PHONY: findbugs
 findbugs: $(INTERNAL_FINDBUGS_HTML_TARGET) $(INTERNAL_FINDBUGS_XML_TARGET)
 
@@ -871,3 +1006,9 @@ modules:
 .PHONY: showcommands
 showcommands:
 	@echo >/dev/null
+
+# BEGIN MOT NPF CHECK, e7664c, IKMAIN-45990, 06/19/2012
+.PHONY: installed_modules_file
+installed_modules_file:
+	$(hide) echo $(subst $(PRODUCT_OUT)/,,$(modules_to_install)) > $(TARGET_OUT_ROOT)/installed_modules.txt
+# END MOT NPF CHECK, e7664c, IKMAIN-45990, 06/19/2012

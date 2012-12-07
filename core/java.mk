@@ -29,7 +29,11 @@ ifneq ($(LOCAL_SDK_VERSION),)
   endif
 else
   ifneq ($(LOCAL_NO_STANDARD_LIBRARIES),true)
-    LOCAL_JAVA_LIBRARIES := core core-junit ext framework filterfw $(LOCAL_JAVA_LIBRARIES)
+    # MOT ICS UPMERGE, w36295, 11/28/2011
+    # BEGIN Motorola, bkdp84, 02/24/2010, IKMAPFOUR-263 / add com.motorola.android.frameworks
+    LOCAL_JAVA_LIBRARIES := core core-junit ext framework filterfw com.motorola.android.frameworks $(LOCAL_JAVA_LIBRARIES)
+    # END IKMAPFOUR-263
+    # END MOT ICS UPMERGE
   endif
 endif
 
@@ -79,6 +83,12 @@ endif
 LOCAL_PROGUARD_ENABLED:=$(strip $(LOCAL_PROGUARD_ENABLED))
 ifeq ($(LOCAL_PROGUARD_ENABLED),disabled)
 LOCAL_PROGUARD_ENABLED :=
+else
+# IKSTABLEONE-584 - jsuttles - Disable PROGUARD by default
+ifeq ($(ENABLE_PROGUARD),)
+    LOCAL_PROGUARD_ENABLED :=
+endif
+# END IKSTABLEONE-584
 endif
 
 # By giving different file name, files can be updated correctly when switching
@@ -347,6 +357,45 @@ $(full_classes_proguard_jar): PRIVATE_INSTRUMENTATION_FOR:=$(strip $(LOCAL_INSTR
 $(full_classes_proguard_jar) : $(full_classes_jar) $(proguard_flag_files) | $(ACP) $(PROGUARD)
 	$(call transform-jar-to-proguard)
 
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# This is a special hack to split the big jar file into two parts to avoid
+# from using the buggy extended dalvik opcode.
+ifeq ($(LOCAL_DEX_WORKAROUND),true)
+splitted_classes_proguard_jar_base := $(addsuffix -base.jar,$(basename $(full_classes_proguard_jar)))
+splitted_classes_proguard_jar_ext :=  $(addsuffix -ext.jar,$(basename $(full_classes_proguard_jar)))
+built_dex_intermediate_ext := $(addsuffix -ext.dex,$(basename $(built_dex_intermediate)))
+built_dex_ext := $(addsuffix -ext.dex,$(basename $(built_dex)))
+$(splitted_classes_proguard_jar_base) : PRIVATE_INTERMEDIATES_DIR := $(intermediates.COMMON)/split-base
+$(splitted_classes_proguard_jar_base) : PRIVATE_TOP_PATH := $(abspath .)
+$(splitted_classes_proguard_jar_base) : $(full_classes_proguard_jar)
+	$(hide) rm -rf $(PRIVATE_INTERMEDIATES_DIR);\
+	mkdir -p $(PRIVATE_INTERMEDIATES_DIR);\
+	cd $(PRIVATE_INTERMEDIATES_DIR);\
+	jar -xf $(PRIVATE_TOP_PATH)/$< ;\
+	rm -rf com;\
+	jar -cf $(PRIVATE_TOP_PATH)/$@ *;\
+	cd - ;\
+	rm -rf $(PRIVATE_INTERMEDIATES_DIR)
+
+$(splitted_classes_proguard_jar_ext) : PRIVATE_INTERMEDIATES_DIR := $(intermediates.COMMON)/split-ext
+$(splitted_classes_proguard_jar_ext) : PRIVATE_TOP_PATH := $(abspath .)
+$(splitted_classes_proguard_jar_ext) : $(full_classes_proguard_jar)
+	$(hide) rm -rf $(PRIVATE_INTERMEDIATES_DIR);\
+	mkdir -p $(PRIVATE_INTERMEDIATES_DIR);\
+	cd $(PRIVATE_INTERMEDIATES_DIR);\
+	jar -xf $(PRIVATE_TOP_PATH)/$< ;\
+	jar -cf $(PRIVATE_TOP_PATH)/$@ com;\
+	cd - ;\
+	rm -rf $(PRIVATE_INTERMEDIATES_DIR)
+
+LOCAL_INTERMEDIATE_TARGETS += \
+    $(splitted_classes_proguard_jar_base) \
+    $(splitted_classes_proguard_jar_ext) \
+    $(built_dex_intermediate_ext) \
+    $(built_dex_ext)
+endif
+# END IKHSS7-2666
+
 ALL_MODULES.$(LOCAL_MODULE).PROGUARD_ENABLED:=$(LOCAL_PROGUARD_ENABLED)
 
 # Override PRIVATE_INTERMEDIATES_DIR so that install-dex-debug
@@ -362,6 +411,27 @@ $(built_dex_intermediate): PRIVATE_DX_FLAGS := $(LOCAL_DX_FLAGS)
 ifneq ($(LOCAL_NO_EMMA_COMPILE),true)
 $(built_dex_intermediate): PRIVATE_DX_FLAGS += --no-locals
 endif
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+ifeq ($(LOCAL_DEX_WORKAROUND),true)
+$(built_dex_intermediate): $(splitted_classes_proguard_jar_base) $(DX)
+	$(transform-classes.jar-to-dex)
+
+$(built_dex_intermediate_ext): PRIVATE_INTERMEDIATES_DIR := $(intermediates.COMMON)
+$(built_dex_intermediate_ext): PRIVATE_DX_FLAGS := $(LOCAL_DX_FLAGS)
+ifneq ($(LOCAL_NO_EMMA_COMPILE),true)
+$(built_dex_intermediate_ext): PRIVATE_DX_FLAGS += --no-locals
+endif
+$(built_dex_intermediate_ext): $(splitted_classes_proguard_jar_ext) $(DX)
+	$(transform-classes.jar-to-dex)
+$(built_dex): $(built_dex_intermediate) | $(ACP)
+	@echo Copying: $@
+	$(hide) $(ACP) -fp $< $@
+$(built_dex_ext): $(built_dex_intermediate_ext) | $(ACP)
+	@echo Copying: $@
+	$(hide) $(ACP) -fp $< $@
+else
+# END IKHSS7-2666
 $(built_dex_intermediate): $(full_classes_proguard_jar) $(DX)
 	$(transform-classes.jar-to-dex)
 $(built_dex): $(built_dex_intermediate) | $(ACP)
@@ -370,6 +440,10 @@ $(built_dex): $(built_dex_intermediate) | $(ACP)
 ifneq ($(GENERATE_DEX_DEBUG),)
 	$(install-dex-debug)
 endif
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+endif
+# END IKHSS7-2666
 
 findbugs_xml := $(intermediates.COMMON)/findbugs.xml
 $(findbugs_xml) : PRIVATE_JAR_FILE := $(full_classes_jar)

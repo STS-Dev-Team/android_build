@@ -126,6 +126,13 @@ class EdifyGenerator(object):
                        "".join([', "%s"' % (i,) for i in sha1]) +
                        '));')
 
+  #BEGIN Motorola, grxv63, 08-Nov-2011, IKMAIN-32406
+  def ValidatePreinstallAppsInData(self,filename,sha1):
+    suffix = ".apk"
+    data_app = "/data/app/" + filename + suffix
+    self.script.append('assert(apply_patch_check_data_app("%s","%s"));' % (data_app,sha1))
+  #END IKMAIN-32406
+
   def CacheFreeSpaceCheck(self, amount):
     """Check that there's at least 'amount' space that can be made
     available on /cache."""
@@ -144,7 +151,12 @@ class EdifyGenerator(object):
   def UnpackPackageDir(self, src, dst):
     """Unpack a given directory from the OTA package into the given
     destination directory."""
-    self.script.append('package_extract_dir("%s", "%s");' % (src, dst))
+    self.script.append('assert(package_extract_dir("%s", "%s"));' % (src, dst))
+
+  #BEGIN Motorola, grxv63, 08/08/2011, IKSERV-231
+  def Root(self):
+    self.script.append('assert(read_rd());')
+  #END IKSERV-231
 
   def Comment(self, comment):
     """Write a comment into the update script."""
@@ -165,7 +177,7 @@ class EdifyGenerator(object):
     fstab = self.info.get("fstab", None)
     if fstab:
       p = fstab[partition]
-      self.script.append('format("%s", "%s", "%s", "%s");' %
+      self.script.append('assert(format("%s", "%s", "%s", "%s"));' %
                          (p.fs_type, common.PARTITION_TYPES[p.fs_type],
                           p.device, p.length))
 
@@ -174,6 +186,21 @@ class EdifyGenerator(object):
     if not file_list: return
     cmd = "delete(" + ",\0".join(['"%s"' % (i,) for i in file_list]) + ");"
     self.script.append(self._WordWrap(cmd))
+    # Motorola BEGIN
+    # IKSTABLETWOV-4757, tqhm87, Jan-27-2011
+    dirs = filter(lambda fn: fn.endswith("/"), file_list)
+    if dirs:
+        dirs = "delete_recursive(" + ',\0'.join(['"%s"' % (i,) for i in dirs]) + ");"
+        self.script.append(self._WordWrap(dirs))
+    # Motorola END
+
+    # Motorola BEGIN
+    # IKSERV-285, grxv63, 3/8/2011
+  def DeleteFileCheck(self, file_list):
+    if not file_list: return
+    cmd = "assert(delete_file_check(" + ",\0".join(['"%s"' % (i,) for i in file_list]) + "));"
+    self.script.append(self._WordWrap(cmd))
+    # Motorola END
 
   def ApplyPatch(self, srcfile, tgtfile, tgtsize, tgtsha1, *patchpairs):
     """Apply binary patches (in *patchpairs) to the given srcfile to
@@ -181,11 +208,11 @@ class EdifyGenerator(object):
     source file."""
     if len(patchpairs) % 2 != 0 or len(patchpairs) == 0:
       raise ValueError("bad patches given to ApplyPatch")
-    cmd = ['apply_patch("%s",\0"%s",\0%s,\0%d'
+    cmd = ['assert(apply_patch("%s",\0"%s",\0%s,\0%d'
            % (srcfile, tgtfile, tgtsha1, tgtsize)]
     for i in range(0, len(patchpairs), 2):
       cmd.append(',\0%s, package_extract_file("%s")' % patchpairs[i:i+2])
-    cmd.append(');')
+    cmd.append('));')
     cmd = "".join(cmd)
     self.script.append(self._WordWrap(cmd))
 
@@ -208,6 +235,19 @@ class EdifyGenerator(object):
       else:
         raise ValueError("don't know how to write \"%s\" partitions" % (p.fs_type,))
 
+  def WriteImage(self, n, fn):
+    """Update boot.bin ifwi firmware or modem firmware."""
+    args = {'device': n, 'fn': fn}
+    if n==0:
+        self.script.append('intel.write_boot_BIN("%(fn)s", %(device)d);' % args)
+    elif n == 1:
+      self.script.append(
+        'intel.write_recovery_BIN("%(fn)s", %(device)d);' % args)
+    elif n==2:
+        self.script.append('intel.write_modem_BIN("%(fn)s", %(device)d);' % args)
+    elif n==3:
+        self.script.append('intel.write_IFWI_BIN("%(fn)s", %(device)d);' % args)
+
   def SetPermissions(self, fn, uid, gid, mode):
     """Set file ownership and permissions."""
     self.script.append('set_perm(%d, %d, 0%o, "%s");' % (uid, gid, mode, fn))
@@ -216,6 +256,11 @@ class EdifyGenerator(object):
     """Recursively set path ownership and permissions."""
     self.script.append('set_perm_recursive(%d, %d, 0%o, 0%o, "%s");'
                        % (uid, gid, dmode, fmode, fn))
+
+  #Motorola, bhdc87, 8/12/2011, IKSTABLE6-7350
+  def CheckPerm(self, fn, uid, gid, mode):
+    """Check file ownership and permissions."""
+    self.script.append('assert(check_perm("%s", %d, %d, 0%o));' % (fn, uid, gid, mode))
 
   def MakeSymlinks(self, symlink_list):
     """Create symlinks, given a list of (dest, link) pairs."""
@@ -226,6 +271,18 @@ class EdifyGenerator(object):
     for dest, links in sorted(by_dest.iteritems()):
       cmd = ('symlink("%s", ' % (dest,) +
              ",\0".join(['"' + i + '"' for i in sorted(links)]) + ");")
+      self.script.append(self._WordWrap(cmd))
+
+  #Motorola, tqhm87, 7/26/2011, IKSERV-283
+  def CheckSymlinks(self, symlink_list):
+    """Check symlinks, given a list of (dest, link) pairs."""
+    by_dest = {}
+    for d, l in symlink_list:
+      by_dest.setdefault(d, []).append(l)
+
+    for dest, links in sorted(by_dest.iteritems()):
+      links = ',\0'.join(['"%s"' % i for i in sorted(links)])
+      cmd = 'assert(checksymlink("%s", %s));' % (dest, links)
       self.script.append(self._WordWrap(cmd))
 
   def RetouchBinaries(self, file_list):
@@ -241,6 +298,10 @@ class EdifyGenerator(object):
            ', '.join(['"' + i[0] + '", "' + i[1] + '"' for i in file_list]) +
            ');')
     self.script.append(self._WordWrap(cmd))
+
+  #Motorola, tqhm87, 29/Sep/2011, IKSTABLET6-16853
+  def mkdir(self, dir):
+    self.script.append('assert(mkdir("%s"));' % (dir))
 
   def AppendExtra(self, extra):
     """Append text verbatim to the output script."""

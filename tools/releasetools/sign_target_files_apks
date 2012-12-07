@@ -88,6 +88,32 @@ OPTIONS.key_map = {}
 OPTIONS.replace_ota_keys = False
 OPTIONS.tag_changes = ("-test-keys", "-dev-keys", "+release-keys")
 
+#BEGIN Motorola, tbdc37, 08/05/2011, IKCBS-2087
+def GetMulticonfigBuildProps(tf_zip):
+  """There can be other build.prop introduced because of
+  Streamline builds,so script should update BUILD_TAGS for them
+  as well."""
+  all_build_props = []
+  for info in tf_zip.infolist():
+     if info.filename.endswith('build.prop') and info.filename.startswith('SYSTEM/multiconfig'):
+        all_build_props.append(info.filename)
+  return all_build_props
+#END Motorola, tbdc37, 08/05/2011, IKCBS-2087
+
+# BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+PREINSTALL_MAP = {}
+def GetPreinstallMap(tf_zip):
+  try:
+    for line in tf_zip.read("META/preinstall_map.txt").split("\n"):
+      line = line.strip()
+      if not line: continue
+      package,apkname = line.split(" ")
+      PREINSTALL_MAP[package] = apkname
+  except KeyError:
+    # ok if preinstall_map.txt doesn't exist
+    pass
+#END IKMAIN-27093
+
 def GetApkCerts(tf_zip):
   certmap = common.ReadApkCerts(tf_zip)
 
@@ -141,13 +167,26 @@ def SignApks(input_tf_zip, output_tf_zip, apk_key_map, key_passwords):
   maxsize = max([len(os.path.basename(i.filename))
                  for i in input_tf_zip.infolist()
                  if i.filename.endswith('.apk')])
-
+  #BEGIN Motorola, tbdc37, 08/05/2011, IKCBS-2087
+  multiconfig_build_prop = GetMulticonfigBuildProps(input_tf_zip)
+  #END Motorola, tbdc37, 08/05/2011, IKCBS-2087
   for info in input_tf_zip.infolist():
     data = input_tf_zip.read(info.filename)
     out_info = copy.copy(info)
-    if info.filename.endswith(".apk"):
+    # BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+    # add support for those preinstall apks without suffix:.apk
+    if info.filename.endswith(".apk") or "preinstall/app" in info.filename.lower():
       name = os.path.basename(info.filename)
-      key = apk_key_map[name]
+      if not name.endswith(".apk"):
+        #check those built preinstall apks
+        if name in PREINSTALL_MAP:
+          name_apk = PREINSTALL_MAP[name]
+          key = apk_key_map[name_apk]
+        else:
+          key = "PRESIGNED"
+      else:
+        key = apk_key_map[name]
+    # END IKMAIN-27093
       if key not in common.SPECIAL_CERT_STRINGS:
         print "    signing: %-*s (%s)" % (maxsize, name, key)
         signed_data = SignApk(data, key, key_passwords[key])
@@ -157,7 +196,8 @@ def SignApks(input_tf_zip, output_tf_zip, apk_key_map, key_passwords):
         print "NOT signing: %s" % (name,)
         output_tf_zip.writestr(out_info, data)
     elif info.filename in ("SYSTEM/build.prop",
-                           "RECOVERY/RAMDISK/default.prop"):
+                           "RECOVERY/RAMDISK/default.prop") or info.filename in multiconfig_build_prop:
+      #update multiconfig build.prop too
       print "rewriting %s:" % (info.filename,)
       new_data = RewriteProps(data)
       output_tf_zip.writestr(out_info, new_data)
@@ -331,6 +371,10 @@ def main(argv):
 
   apk_key_map = GetApkCerts(input_zip)
   CheckAllApksSigned(input_zip, apk_key_map)
+
+# BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+  GetPreinstallMap(input_zip)
+# END IKMAIN-27093
 
   key_passwords = common.GetKeyPasswords(set(apk_key_map.values()))
   SignApks(input_zip, output_zip, apk_key_map, key_passwords)

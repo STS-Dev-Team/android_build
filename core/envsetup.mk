@@ -17,40 +17,44 @@ include $(BUILD_SYSTEM)/version_defaults.mk
 # buildspec.mk.default and envsetup.sh.
 CORRECT_BUILD_ENV_SEQUENCE_NUMBER := 10
 
+# Motorola BEGIN - jsuttles - IKMAIN-5682
+# This chunk of code was moved into core/product_config.mk so it
+# could be setup earlier for use in core/product_config.mk
 # ---------------------------------------------------------------
 # The product defaults to generic on hardware
 # NOTE: This will be overridden in product_config.mk if make
 # was invoked with a PRODUCT-xxx-yyy goal.
-ifeq ($(TARGET_PRODUCT),)
-TARGET_PRODUCT := full
-endif
+#ifeq ($(TARGET_PRODUCT),)
+#TARGET_PRODUCT := full
+#endif
 
 
 # the variant -- the set of files that are included for a build
-ifeq ($(strip $(TARGET_BUILD_VARIANT)),)
-TARGET_BUILD_VARIANT := eng
-endif
+#ifeq ($(strip $(TARGET_BUILD_VARIANT)),)
+#TARGET_BUILD_VARIANT := eng
+#endif
 
 # ---------------------------------------------------------------
 # Set up configuration for host machine.  We don't do cross-
 # compiles except for arm, so the HOST is whatever we are
 # running on
 
-UNAME := $(shell uname -sm)
+#UNAME := $(shell uname -sm)
 
 # HOST_OS
-ifneq (,$(findstring Linux,$(UNAME)))
-	HOST_OS := linux
-endif
-ifneq (,$(findstring Darwin,$(UNAME)))
-	HOST_OS := darwin
-endif
-ifneq (,$(findstring Macintosh,$(UNAME)))
-	HOST_OS := darwin
-endif
-ifneq (,$(findstring CYGWIN,$(UNAME)))
-	HOST_OS := windows
-endif
+#ifneq (,$(findstring Linux,$(UNAME)))
+#	HOST_OS := linux
+#endif
+#ifneq (,$(findstring Darwin,$(UNAME)))
+#	HOST_OS := darwin
+#endif
+#ifneq (,$(findstring Macintosh,$(UNAME)))
+#	HOST_OS := darwin
+#endif
+#ifneq (,$(findstring CYGWIN,$(UNAME)))
+#	HOST_OS := windows
+#endif
+# END - IKMAIN-5682
 
 # BUILD_OS is the real host doing the build.
 BUILD_OS := $(HOST_OS)
@@ -102,9 +106,14 @@ else
   HOST_PREBUILT_TAG := $(HOST_OS)-$(HOST_ARCH)
 endif
 
+# Motorola BEGIN - jsuttles - IKMAIN-5682
+# This chunk of code was moved into core/product_config.mk so it
+# could be setup earlier for use in core/product_config.mk
+
 # Read the product specs so we an get TARGET_DEVICE and other
 # variables that we need in order to locate the output files.
-include $(BUILD_SYSTEM)/product_config.mk
+#include $(BUILD_SYSTEM)/product_config.mk
+# END - IKMAIN-5682
 
 build_variant := $(filter-out eng user userdebug tests,$(TARGET_BUILD_VARIANT))
 ifneq ($(build_variant)-$(words $(TARGET_BUILD_VARIANT)),-1)
@@ -159,7 +168,19 @@ TARGET_PRODUCT_OUT_ROOT := $(TARGET_OUT_ROOT)/product
 TARGET_COMMON_OUT_ROOT := $(TARGET_OUT_ROOT)/common
 HOST_COMMON_OUT_ROOT := $(HOST_OUT_ROOT)/common
 
-PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)
+# Motorola BEGIN - jsuttles - IKMAIN-5682
+# Use the HW_CONFIG on the build path
+#THOR_ICS_MERGE_TODO - w17724 see IKXTHOR1-325
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+  PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)
+else
+ifneq ($(HW_CONFIG),)
+  PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)-$(HW_CONFIG)
+else
+  PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)
+endif
+endif
+# END - IKMAIN-5682
 
 OUT_DOCS := $(TARGET_COMMON_OUT_ROOT)/docs
 
@@ -213,6 +234,9 @@ TARGET_OUT_VENDOR_SHARED_LIBRARIES:= $(TARGET_OUT_VENDOR)/lib
 TARGET_OUT_VENDOR_JAVA_LIBRARIES:= $(TARGET_OUT_VENDOR)/framework
 TARGET_OUT_VENDOR_APPS:= $(TARGET_OUT_VENDOR)/app
 TARGET_OUT_VENDOR_ETC := $(TARGET_OUT_VENDOR)/etc
+# BEGIN Motorola, IKXTHOR1-43
+TARGET_OUT_VENDOR_FIRMWARE:= $(TARGET_OUT_VENDOR)/firmware
+# END IKXTHOR1-43
 
 TARGET_OUT_UNSTRIPPED := $(PRODUCT_OUT)/symbols
 TARGET_OUT_EXECUTABLES_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/system/bin
@@ -229,6 +253,11 @@ TARGET_ROOT_OUT_USR := $(TARGET_ROOT_OUT)/usr
 
 TARGET_RECOVERY_OUT := $(PRODUCT_OUT)/recovery
 TARGET_RECOVERY_ROOT_OUT := $(TARGET_RECOVERY_OUT)/root
+
+TARGET_FASTBOOT_OUT := $(PRODUCT_OUT)/fastboot
+TARGET_FASTBOOT_ROOT_OUT := $(TARGET_FASTBOOT_OUT)/root
+TARGET_DROIDBOOT_OUT := $(PRODUCT_OUT)/droidboot
+TARGET_DROIDBOOT_ROOT_OUT := $(TARGET_DROIDBOOT_OUT)/root
 
 TARGET_SYSLOADER_OUT := $(PRODUCT_OUT)/sysloader
 TARGET_SYSLOADER_ROOT_OUT := $(TARGET_SYSLOADER_OUT)/root
@@ -248,3 +277,6 @@ endif
 ifeq ($(PRINT_BUILD_CONFIG),)
 PRINT_BUILD_CONFIG := true
 endif
+
+## Include build_id makefile to export correct build-id based on product config branch
+-include motorola/build_ids/build_id.mk

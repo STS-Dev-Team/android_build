@@ -4,7 +4,25 @@
 ####################################
 
 # TODO: replace it with device's BOOTCLASSPATH
-DEXPREOPT_BOOT_JARS := core:core-junit:bouncycastle:ext:framework:android.policy:services:apache-xml:filterfw
+# BEGIN MOT ICS UPMERGE, w36295, 11/28/2011
+# Add com.motorola.android.frameworks.jar &
+# com.motorola.android.widget into the
+# preopt jar list for boot classes
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+DEXPREOPT_BOOT_JARS := core:core-junit:bouncycastle:ext:framework:framework-ext:android.policy:services:apache-xml:filterfw:com.motorola.android.frameworks:com.motorola.android.widget:com.motorola.frameworks.core.addon
+# END IKHSS7-2666
+# END MOT ICS UPMERGE
+
+# if MOT_ADDTL_DEXPREOPT_JARS is defined, append it.
+# this is for carrier specific library that have not to be included for other carrier build
+# if library is global common, please don't use MOT_ADDTL_DEXPREOPT_JARS.
+ifneq ($(strip $(MOT_ADDTL_DEXPREOPT_JARS)),)
+# BEGIN Motorola, a5705c, 09/05/2011, IKMAIN-27073
+DEXPREOPT_BOOT_JARS := $(strip $(DEXPREOPT_BOOT_JARS)):$(subst $(space),:,$(strip $(sort $(MOT_ADDTL_DEXPREOPT_JARS))))
+# END IKMAIN-27073
+endif
+
 DEXPREOPT_BOOT_JARS_MODULES := $(subst :, ,$(DEXPREOPT_BOOT_JARS))
 
 DEXPREOPT_BUILD_DIR := $(OUT_DIR)
@@ -45,7 +63,14 @@ define _dexpreopt-boot-jar
 $(eval _dbj_jar := $(DEXPREOPT_BOOT_JAR_DIR_FULL_PATH)/$(1).jar)
 $(eval _dbj_odex := $(DEXPREOPT_BOOT_JAR_DIR_FULL_PATH)/$(1).odex)
 $(eval _dbj_jar_no_dex := $(DEXPREOPT_BOOT_JAR_DIR_FULL_PATH)/$(1)_nodex.jar)
-$(eval _dbj_src_jar := $(call intermediates-dir-for,JAVA_LIBRARIES,$(1),,COMMON)/javalib.jar)
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+# special hack for dex workaround
+$(eval $(if $(filter framework-ext,$(1)),\
+    $(eval _dbj_src_jar := $(call intermediates-dir-for,JAVA_LIBRARIES,framework,,COMMON)/javalib-ext.jar),\
+    $(eval _dbj_src_jar := $(call intermediates-dir-for,JAVA_LIBRARIES,$(1),,COMMON)/javalib.jar)\
+))
+# END IKHSS7-2666
 $(eval $(_dbj_odex): PRIVATE_DBJ_JAR := $(_dbj_jar))
 $(_dbj_odex) : $(_dbj_src_jar) | $(ACP) $(DEXPREOPT) $(DEXOPT)
 	@echo "Dexpreopt Boot Jar: $$@"

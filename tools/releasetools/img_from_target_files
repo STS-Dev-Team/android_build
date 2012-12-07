@@ -66,7 +66,7 @@ def AddUserdata(output_zip):
 
   build_command = []
   fstab = OPTIONS.info_dict["fstab"]
-  if fstab and fstab["/data"].fs_type.startswith("ext"):
+  if fstab and fstab["/data"].fs_type.startswith("ext4"):
     build_command = ["mkuserimg.sh"]
     if "extfs_sparse_flag" in OPTIONS.info_dict:
       build_command.append(OPTIONS.info_dict["extfs_sparse_flag"])
@@ -74,6 +74,12 @@ def AddUserdata(output_zip):
                      fstab["/data"].fs_type, "data"])
     if "userdata_size" in OPTIONS.info_dict:
       build_command.append(str(OPTIONS.info_dict["userdata_size"]))
+  # Motorola BEGIN IKSTABLEFOURV-1187: Added ext2 & ext3 support
+  elif OPTIONS.info_dict["fstab"]["/data"].fs_type.startswith("ext2"):
+    common.CreateImageExt2(user_dir, img.name, journal=False, label='userdata')
+  elif OPTIONS.info_dict["fstab"]["/data"].fs_type.startswith("ext3"):
+    common.CreateImageExt2(user_dir, img.name, journal=True, label='userdata')
+  # Motorola END IKSTABLEFOURV-1187
   else:
     build_command = ["mkyaffs2image", "-f"]
     extra = OPTIONS.info_dict.get("mkyaffs2_extra_flags", None)
@@ -82,9 +88,10 @@ def AddUserdata(output_zip):
     build_command.append(user_dir)
     build_command.append(img.name)
 
-  p = common.Run(build_command);
-  p.communicate()
-  assert p.returncode == 0, "build userdata.img image failed"
+  if build_command != []:
+    p = common.Run(build_command)
+    p.communicate()
+    assert p.returncode == 0, "build userdata.img image failed"
 
   common.CheckSize(img.name, "userdata.img", OPTIONS.info_dict)
   output_zip.write(img.name, "userdata.img")
@@ -116,8 +123,12 @@ def AddSystem(output_zip):
       pass
 
   build_command = []
+  fixed_image_size = OPTIONS.info_dict.get("system_size", None)
+  if fixed_image_size is not None:
+    fixed_image_size = fixed_image_size / 1024
+
   fstab = OPTIONS.info_dict["fstab"]
-  if fstab and fstab["/system"].fs_type.startswith("ext"):
+  if fstab and fstab["/system"].fs_type.startswith("ext4"):
 
     build_command = ["mkuserimg.sh"]
     if "extfs_sparse_flag" in OPTIONS.info_dict:
@@ -126,6 +137,12 @@ def AddSystem(output_zip):
                      fstab["/system"].fs_type, "system"])
     if "system_size" in OPTIONS.info_dict:
       build_command.append(str(OPTIONS.info_dict["system_size"]))
+  # Motorola BEGIN IKSTABLEFOURV-1187: Added ext2 & ext3 support
+  elif OPTIONS.info_dict["fstab"]["/system"].fs_type.startswith("ext2"):
+    common.CreateImageExt2(os.path.join(OPTIONS.input_tmp, "system"), img.name, journal=False, label='system', num_blocks=fixed_image_size)
+  elif OPTIONS.info_dict["fstab"]["/system"].fs_type.startswith("ext3"):
+    common.CreateImageExt2(os.path.join(OPTIONS.input_tmp, "system"), img.name, journal=True, label='system', num_blocks=fixed_image_size)
+  # Motorola END IKSTABLEFOURV-1187
   else:
     build_command = ["mkyaffs2image", "-f"]
     extra = OPTIONS.info_dict.get("mkyaffs2_extra_flags", None)
@@ -134,15 +151,17 @@ def AddSystem(output_zip):
     build_command.append(os.path.join(OPTIONS.input_tmp, "system"))
     build_command.append(img.name)
 
-  p = common.Run(build_command)
-  p.communicate()
-  assert p.returncode == 0, "build system.img image failed"
+  if build_command != []:
+    p = common.Run(build_command)
+    p.communicate()
+    assert p.returncode == 0, "build system.img image failed"
 
   img.seek(os.SEEK_SET, 0)
   data = img.read()
   img.close()
 
-  common.CheckSize(data, "system.img", OPTIONS.info_dict)
+  if fixed_image_size is None:
+    common.CheckSize(data, "system.img", OPTIONS.info_dict)
   common.ZipWriteStr(output_zip, "system.img", data)
 
 

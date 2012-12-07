@@ -48,6 +48,8 @@ pathmap_INCL := \
     libthread_db:bionic/libthread_db/include \
     mkbootimg:system/core/mkbootimg \
     recovery:bootable/recovery \
+    fastboot:device/intel/aboot/fastboot \
+    droidboot:bootable/droidboot \
     system-core:system/core/include \
     speex:external/speex/include
 
@@ -84,6 +86,7 @@ FRAMEWORKS_BASE_SUBDIRS := \
 	    location \
 	    media \
 	    drm \
+	    ethernet \
 	    opengl \
 	    sax \
 	    telephony \

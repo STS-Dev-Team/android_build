@@ -77,6 +77,46 @@ define find-copy-subdir-files
 $(shell find $(2) -name "$(1)" | $(SED_EXTENDED) "s:($(2)/?(.*)):\\1\\:$(3)/\\2:" | sed "s://:/:g")
 endef
 
+# Motorola BEGIN - jsuttles - IKMAIN-5682
+# This chunk of code was moved from core/envsetup.mk, since
+# otherwise the default values are never set
+
+# ---------------------------------------------------------------
+# The product defaults to generic on hardware
+# NOTE: This will be overridden in product_config.mk if make
+# was invoked with a PRODUCT-xxx-yyy goal.
+ifeq ($(TARGET_PRODUCT),)
+TARGET_PRODUCT := full
+endif
+
+
+# the variant -- the set of files that are included for a build
+ifeq ($(strip $(TARGET_BUILD_VARIANT)),)
+TARGET_BUILD_VARIANT := eng
+endif
+
+# ---------------------------------------------------------------
+# Set up configuration for host machine.  We don't do cross-
+# compiles except for arm, so the HOST is whatever we are
+# running on
+
+UNAME := $(shell uname -sm)
+
+# HOST_OS
+ifneq (,$(findstring Linux,$(UNAME)))
+	HOST_OS := linux
+endif
+ifneq (,$(findstring Darwin,$(UNAME)))
+	HOST_OS := darwin
+endif
+ifneq (,$(findstring Macintosh,$(UNAME)))
+	HOST_OS := darwin
+endif
+ifneq (,$(findstring CYGWIN,$(UNAME)))
+	HOST_OS := windows
+endif
+# END - IKMAIN-5682
+
 # ---------------------------------------------------------------
 
 # These are the valid values of TARGET_BUILD_VARIANT.  Also, if anything else is passed
@@ -305,6 +345,10 @@ DEVICE_PACKAGE_OVERLAYS := \
 
 # An list of whitespace-separated words.
 PRODUCT_TAGS := $(strip $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_TAGS))
+
+# The list of product-specific kernel header dirs
+PRODUCT_VENDOR_KERNEL_HEADERS := \
+    $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_VENDOR_KERNEL_HEADERS)
 
 # Add the product-defined properties to the build properties.
 ADDITIONAL_BUILD_PROPERTIES := \

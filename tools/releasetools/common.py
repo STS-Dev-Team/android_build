@@ -27,6 +27,8 @@ import tempfile
 import threading
 import time
 import zipfile
+import pexpect
+import string
 
 try:
   from hashlib import sha1 as sha1
@@ -45,6 +47,11 @@ OPTIONS.tempfiles = []
 OPTIONS.device_specific = None
 OPTIONS.extras = {}
 OPTIONS.info_dict = None
+OPTIONS.hab_sign = False
+OPTIONS.cst_path = "motorola/hab_cst_client/apk"
+OPTIONS.user = os.environ["USER"]
+OPTIONS.system_type = "yaffs"
+OPTIONS.userdata_type = "yaffs"
 
 
 # Values for "certificate" in apkcerts that mean special things.
@@ -61,6 +68,11 @@ def Run(args, **kwargs):
     print "  running: ", " ".join(args)
   return subprocess.Popen(args, **kwargs)
 
+def RunExpect(args, **kwargs):
+  cmd = string.join(args)
+  if OPTIONS.verbose:
+    print " running w/pexpect: ", cmd
+  return pexpect.spawn(cmd, **kwargs)
 
 def CloseInheritedPipes():
   """ Gmake in MAC OS has file descriptor (PIPE) leak. We close those fds
@@ -108,7 +120,9 @@ def LoadInfoDict(zip):
     try:
       d["recovery_api_version"] = zip.read("META/recovery-api-version.txt").strip()
     except KeyError:
-      raise ValueError("can't find recovery API version in input target-files")
+      print "WARNING: recovery-api-version.txt not found. Hardcoding the Value to 3!!"
+      d["recovery_api_version"] = "3"
+      pass
 
   if "tool_extensions" not in d:
     try:
@@ -140,7 +154,9 @@ def LoadInfoDict(zip):
   makeint("userdata_size")
   makeint("recovery_size")
   makeint("boot_size")
-
+# BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+  makeint("preinstall_size")
+# END IKMAIN-27093
   d["fstab"] = LoadRecoveryFSTab(zip)
   return d
 
@@ -148,18 +164,21 @@ def LoadRecoveryFSTab(zip):
   class Partition(object):
     pass
 
-  try:
-    data = zip.read("RECOVERY/RAMDISK/etc/recovery.fstab")
-  except KeyError:
+  for fstab in ["RECOVERY/RAMDISK/etc/recovery.fstab", "FSTAB/recovery.fstab"]:
+    try:
+      data = zip.read(fstab)
+      break
+    except KeyError:
+      pass
+  else:
     print "Warning: could not find RECOVERY/RAMDISK/etc/recovery.fstab in %s." % zip
-    data = ""
 
   d = {}
   for line in data.split("\n"):
     line = line.strip()
     if not line or line.startswith("#"): continue
     pieces = line.split()
-    if not (3 <= len(pieces) <= 4):
+    if not (3 <= len(pieces)):
       raise ValueError("malformed recovery.fstab line: \"%s\"" % (line,))
 
     p = Partition()
@@ -308,27 +327,48 @@ def GetKeyPasswords(keylist):
 
   no_passwords = []
   need_passwords = []
-  devnull = open("/dev/null", "w+b")
-  for k in sorted(keylist):
-    # We don't need a password for things that aren't really keys.
-    if k in SPECIAL_CERT_STRINGS:
-      no_passwords.append(k)
-      continue
+  if not OPTIONS.hab_sign:
+    devnull = open("/dev/null", "w+b")
+    for k in sorted(keylist):
+      # We don't need a password for things that aren't really keys.
+      if k in SPECIAL_CERT_STRINGS:
+        no_passwords.append(k)
+        continue
 
-    p = Run(["openssl", "pkcs8", "-in", k+".pk8",
-             "-inform", "DER", "-nocrypt"],
-            stdin=devnull.fileno(),
-            stdout=devnull.fileno(),
-            stderr=subprocess.STDOUT)
-    p.communicate()
-    if p.returncode == 0:
-      no_passwords.append(k)
+      p = Run(["openssl", "pkcs8", "-in", k+".pk8",
+               "-inform", "DER", "-nocrypt"],
+              stdin=devnull.fileno(),
+              stdout=devnull.fileno(),
+              stderr=subprocess.STDOUT)
+      p.communicate()
+      if p.returncode == 0:
+        no_passwords.append(k)
+      else:
+        need_passwords.append(k)
+    devnull.close()
+
+    key_passwords = PasswordManager().GetPasswords(need_passwords)
+    key_passwords.update(dict.fromkeys(no_passwords, None))
+  else:
+    """In case of automated signing we do not need to collect credentials"""
+    if os.environ.get("CST_AUTO_SIGN") == '1' and \
+       os.path.isfile(OPTIONS.cst_path + "/config/hab_service.config"):
+      passwd=""
     else:
-      need_passwords.append(k)
-  devnull.close()
+      passwd=getpass.getpass("Enter Motorola OneIT password for coreID ( %s ) > " % OPTIONS.user)
 
-  key_passwords = PasswordManager().GetPasswords(need_passwords)
-  key_passwords.update(dict.fromkeys(no_passwords, None))
+    for k in sorted(keylist):
+      # An empty-string key is used to mean don't re-sign this package.
+      # Obviously we don't need a password for this non-key.
+      if not k:
+        no_passwords.append(k)
+        continue
+      """ for all packages that need HAB signing, will require password """
+      need_passwords.append(k)
+      
+      key_passwords = dict.fromkeys(need_passwords, passwd) 
+      key_passwords.update(dict.fromkeys(no_passwords, None))
+
   return key_passwords
 
 
@@ -355,19 +395,76 @@ def SignFile(input_name, output_name, key, password, align=None,
   else:
     sign_name = output_name
 
-  cmd = ["java", "-Xmx2048m", "-jar",
+  if not OPTIONS.hab_sign:
+    cmd = ["java", "-Xmx2048m", "-jar",
            os.path.join(OPTIONS.search_path, "framework", "signapk.jar")]
-  if whole_file:
-    cmd.append("-w")
-  cmd.extend([key + ".x509.pem", key + ".pk8",
-              input_name, sign_name])
 
-  p = Run(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  if password is not None:
-    password += "\n"
-  p.communicate(password)
-  if p.returncode != 0:
-    raise ExternalError("signapk.jar failed: return code %s" % (p.returncode,))
+    if whole_file:
+      cmd.append("-w")
+
+    cmd.extend([key + ".x509.pem", key + ".pk8",
+                input_name, sign_name])
+
+    p = Run(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    if password is not None:
+      password += "\n"
+    p.communicate(password)
+    if p.returncode != 0:
+      raise ExternalError("signapk.jar failed: return code %s" % (p.returncode,))
+  else:
+    userid = OPTIONS.user
+    env = os.environ
+    cwd = os.getcwd()
+    env["CST_CLIENT_INSTALL_PATH"] = OPTIONS.cst_path
+
+    c = RunExpect(["java",
+                   "-Xmx2048m",
+                   "-jar",
+                   os.path.join(OPTIONS.cst_path, "bin", "signapk.jar "),
+                   key + ".x509.crt",
+                   "HAB",
+                   input_name,
+                   sign_name],
+                  env=env,
+                  cwd=cwd)
+
+    if OPTIONS.verbose:
+      """ only read output from signapk.jar """
+      c.logfile_read = sys.stdout
+
+    """In case of automated signing signapk.jar doesn't request userid & pswd"""
+    if os.environ.get("CST_AUTO_SIGN") != '1' or \
+       not os.path.isfile(OPTIONS.cst_path + "/config/hab_service.config"):
+      rcvd = c.expect(['user ID:',pexpect.EOF,pexpect.TIMEOUT], timeout=15)
+      if rcvd == 0:
+        userid += "\n"
+        c.send(userid)
+      elif rcvd == 1:
+        print c.before
+        raise ExternalError("signapk.jar failed.")
+      elif rcvd == 2:
+        raise ExternalError("timed out waiting for userID prompt from signapk.jar!")
+      rcvd = c.expect(['Password:',pexpect.EOF,pexpect.TIMEOUT], timeout=15)
+      if rcvd == 0:
+        password += "\n"
+        c.setecho(False)
+        c.send(password)
+        c.setecho(True)
+        c.logfile_read = sys.stdout
+      elif rcvd == 1:
+        print c.before
+        raise ExternalError("signapk.jar failed.")
+      elif rcvd == 2:
+        raise ExternalError("timed out waiting for password prompt from signapk.jar!")
+
+    rcvd = c.expect([pexpect.EOF,pexpect.TIMEOUT], timeout=60)
+    if rcvd == 0:
+      """ always call close() before trying to read exitstatus """
+      c.close()
+      if c.exitstatus != 0:
+        raise ExternalError("signapk.jar failed with an error.")
+    elif rcvd == 1:
+      raise ExternalError("signapk.jar timeout waiting for CST response.")
 
   if align:
     p = Run(["zipalign", "-f", str(align), sign_name, output_name])
@@ -440,12 +537,19 @@ COMMON_DOCSTRING = """
       Path to the python module containing device-specific
       releasetools code.
 
-  -x  (--extra)  <key=value>
-      Add a key/value pair to the 'extras' dict, which device-specific
-      extension code may look at.
-
   -v  (--verbose)
       Show command lines being executed.
+
+  -m  (--hab_sign)
+      Alternatively sign APK's using HAB Signing Server
+
+  -c  (--cst_path)
+      Path to HAB code signing tools installation, defaults to
+      motorola/hab_cst_client/apk. Only used with --hab_sign option.
+
+  -u  (--user)
+      Specify UserID to use when using HAB signing option. The userID
+      must be a Motorola CoreID. Defaults to system login userID.
 
   -h  (--help)
       Display this usage message and exit.
@@ -468,8 +572,8 @@ def ParseOptions(argv,
 
   try:
     opts, args = getopt.getopt(
-        argv, "hvp:s:x:" + extra_opts,
-        ["help", "verbose", "path=", "device_specific=", "extra="] +
+        argv, "hvp:s:" + extra_opts,
+        ["help", "verbose", "path=", "device_specific=", "extra=", "hab_sign", "cst_path=", "user=", "system_type=", "userdata_type="] +
           list(extra_long_opts))
   except getopt.GetoptError, err:
     Usage(docstring)
@@ -477,6 +581,8 @@ def ParseOptions(argv,
     sys.exit(2)
 
   path_specified = False
+
+  filesystem_types = ["yaffs", "ext2", "ext3"]
 
   for o, a in opts:
     if o in ("-h", "--help"):
@@ -491,6 +597,18 @@ def ParseOptions(argv,
     elif o in ("-x", "--extra"):
       key, value = a.split("=", 1)
       OPTIONS.extras[key] = value
+    elif o in ("-hab", "--hab_sign"):
+      OPTIONS.hab_sign = True
+    elif o in ("-c", "--cst_path"):
+      OPTIONS.cst_path = a
+    elif o in ("-u", "--user"):
+      OPTIONS.user = a
+    elif o == "--system_type":
+      assert a in filesystem_types, "unknown system fs type \"%s\"" % (a,)
+      OPTIONS.system_type = a
+    elif o == "--userdata_type":
+      assert a in filesystem_types, "unknown userdata fs type \"%s\"" % (a,)
+      OPTIONS.userdata_type = a
     else:
       if extra_option_handler is None or not extra_option_handler(o, a):
         assert False, "unknown option \"%s\"" % (o,)
@@ -559,8 +677,12 @@ class PasswordManager(object):
         result[k] = v
       else:
         while True:
-          result[k] = getpass.getpass("Enter password for %s key> "
+          if sys.stdin.isatty():
+            result[k] = getpass.getpass("Enter password for %s key> "
                                       % (k,)).strip()
+          else:
+            #result[k] = sys.stdin.readline().rstrip()
+            result[k] = "calgaryRocks"
           if result[k]: break
     return result
 
@@ -625,7 +747,6 @@ class DeviceSpecificParams(object):
     module."""
     for k, v in kwargs.iteritems():
       setattr(self, k, v)
-    self.extras = OPTIONS.extras
 
     if self.module is None:
       path = OPTIONS.device_specific
@@ -676,11 +797,52 @@ class DeviceSpecificParams(object):
     script before any changes are made."""
     return self._DoCall("IncrementalOTA_VerifyEnd")
 
+  def IncrementalBP_VerifyEnd(self):
+    return self._DoCall("IncrementalBP_VerifyEnd")
+
   def IncrementalOTA_InstallEnd(self):
     """Called at the end of incremental OTA installation; typically
     this is used to install the image for the device's baseband
     processor."""
     return self._DoCall("IncrementalOTA_InstallEnd")
+
+#BEGIN Motorola,tbdc37 01/04/2012 IKCBS-2797 Move multiconfig installation at last
+  def IncrementalOTA_Multiconfig_InstallEnd(self):
+    """Called at the end of script generation.Multiconfig related
+    apis should be added at the end of script."""
+    return self._DoCall("IncrementalOTA_Multiconfig_InstallEnd")
+#End Motorola,tbdc37 01/04/2012 IKCBS-2797
+
+#BEGIN Motorola, a22338, 02/15/2011, IKSTABLEFOURV-1037 / Script changes for generating validation pkg
+  def AutoValidation_VerifyEnd(self):
+    return self._DoCall("AutoValidation_VerifyEnd")
+#END IKSTABLEFOURV-1037
+#BEGIN Motorola, tbdc37, 03/17/2011, IKCBS-1224
+  def FullOTA_InstallStart(self):
+    """Called at the beginning of full OTA installation; typically this is
+    used to execute device specific extensions just before the start of the installation
+    process... such as mounting some device-specific partitions."""
+    return self._DoCall("FullOTA_InstallStart")
+
+  def IncrementalOTA_InstallStart(self):
+    """Called at the beginning of incremental OTA installation; typically this is
+    used to execute device specific extensions just before the start of the installation
+    process... such as mounting some device-specific partitions."""
+    return self._DoCall("IncrementalOTA_InstallStart")
+#END IKCBS-1224
+#BEGIN Motorola, fmpr73, 03/23/2012, IKHSS6UPGR-3751
+  def IncrementalBP_InstallBegin(self):
+    """Called at the beginning of full OTA installation; typically to execute
+    BP update before AP update"""
+    return self._DoCall("IncrementalBP_InstallBegin")
+#END IKHSS6UPGR-3751
+#BEGIN Motorola, fmpr73, 03/23/2012, IKHSS6UPGR-3751
+  def FullBP_InstallBegin(self):
+    """Called at the beginning of full OTA installation; typically to execute
+    BP update before AP update"""
+    return self._DoCall("FullBP_InstallBegin")
+#END IKHSS6UPGR-3751
+
 
 class File(object):
   def __init__(self, name, data):
@@ -813,7 +975,8 @@ def ComputeDifferences(diffs):
 
 # map recovery.fstab's fs_types to mount/format "partition types"
 PARTITION_TYPES = { "yaffs2": "MTD", "mtd": "MTD",
-                    "ext4": "EMMC", "emmc": "EMMC" }
+                    "ext4": "EMMC", "emmc": "EMMC",
+                    "ext3": "MTD" , "raw": "MTD" }
 
 def GetTypeAndDevice(mount_point, info):
   fstab = info["fstab"]
@@ -821,3 +984,92 @@ def GetTypeAndDevice(mount_point, info):
     return PARTITION_TYPES[fstab[mount_point].fs_type], fstab[mount_point].device
   else:
     return None
+
+def CreateImageYaffs(input_path, output_image):
+  p = Run(["mkyaffs2image", "-f", input_path, output_image])
+  p.communicate()
+  assert p.returncode == 0, "mkyaffs2image failed: " + output_image
+
+def GetNumInodesForPath(path):
+  """Return the number of inodes needed to store the filesystem rooted
+  at <path>. Equivalent to: `find <path> | wc -l`"""
+  num_inodes = 0
+  for root, dirs, files in os.walk(path):
+    num_inodes += 1 + len(files)
+  return num_inodes
+
+def GetNumBlocksForPath(path):
+  """Return the number of blocks required to store the filesystem rooted
+  at <path>. Equivalent to: `du -sk <path> | tail -n1 | awk '{print $1;}'`"""
+
+  # du will report 0 size for symlinks, make sure this is a real directory
+  path = os.path.realpath(path)
+
+  p = Run(["du", "-sk", path], stdout=subprocess.PIPE)
+  out, err = p.communicate()
+  assert p.returncode == 0, "du failed"
+  return int(out.split()[0])
+# BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+# add support for creating other images except for system&data image.
+def CreateImageExt2(input_path, output_image, journal=False, label=None, num_blocks=None, other_image=False):
+# END IKMAIN-27093
+  """Creates an ext2 image <output_image> from the files rooted at
+  <input_path>. If <journal> is True, add a journal to the file system.
+  If <label> is not None, it will be used as the ext label for the file
+  system. If <num_blocks> is not None, it is the size of the image to
+  generate in 1k blocks.
+  This is the same procedure as external/genext2fs/Config.mk."""
+
+  # add extra inodes
+  num_inodes = GetNumInodesForPath(input_path)
+  extra_inodes = 500
+  num_inodes += extra_inodes
+
+  # compute filesystem size in blocks
+  if num_blocks is None:
+    num_blocks = GetNumBlocksForPath(input_path)
+    if num_blocks < 20480:
+      extra_blocks = 3072
+    else:
+      extra_blocks = 20480
+    num_blocks += extra_blocks
+
+  # create initial image
+  # BEGIN Motorola, w20500, 9/30/2011, IKMAIN-27093/Core apps built from source code to be made deletable
+  # add support for creating other images except for system&data image.
+  if other_image:
+    img_arg='-U'
+  else:
+    img_arg='-a'
+  p = Run(['genext2fs', img_arg, '-d', input_path, '-b', str(num_blocks),
+    '-N', str(num_inodes), '-m', '0', output_image])
+  # END IKMAIN-27093
+  p.communicate()
+  assert p.returncode == 0, "genext2fs failed: " + output_image
+
+  # apply label if requested
+  if label is not None:
+    p = Run(['tune2fs', '-L', label, output_image])
+    p.communicate()
+    assert p.returncode == 0, "failed to set label for " + output_image
+
+  # enable journal if requested
+  if journal:
+    p = Run(['tune2fs', '-j', output_image])
+    p.communicate()
+    assert p.returncode == 0, "failed to create journal for " + output_image
+
+  # enable filetype support (for readdir)
+  p = Run(['tune2fs', '-O', 'filetype', output_image])
+  p.communicate()
+  assert p.returncode == 0, "failed to enable filetype support for " + output_image
+
+  # set mount count to 1
+  p = Run(['tune2fs', '-C', '1', output_image])
+  p.communicate()
+  assert p.returncode == 0, "failed to set mount count for " + output_image
+
+  # check for errors
+  p = Run(['e2fsck', '-fy', output_image])
+  p.communicate()
+  assert p.returncode < 4, "failed error check for " + output_image

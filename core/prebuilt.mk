@@ -16,6 +16,18 @@ ifneq ($(LOCAL_PREBUILT_JAVA_LIBRARIES),)
 $(error dont use LOCAL_PREBUILT_JAVA_LIBRARIES anymore LOCAL_PATH=$(LOCAL_PATH))
 endif
 
+ifneq (true,$(WITH_DEXPREOPT))
+  LOCAL_DEX_PREOPT :=
+else
+  ifeq ($(filter APPS,$(LOCAL_MODULE_CLASS)),)
+    LOCAL_DEX_PREOPT :=
+  else
+    ifneq (true,$(LOCAL_DEX_PREOPT))
+      LOCAL_DEX_PREOPT :=
+    endif
+  endif
+endif
+
 ifdef LOCAL_IS_HOST_MODULE
   my_prefix:=HOST_
 else
@@ -96,7 +108,23 @@ else
   $(built_module) : PRIVATE_CERTIFICATE := $(LOCAL_CERTIFICATE).x509.pem
 endif
 
+# BEGIN Motorola, IKMAIN-1827, a18273, 8/5/2010 / add tegra chipset support
+ifeq ($(TARGET_BOARD_PLATFORM), tegra)
+
+# Prebuilt shared objects also need to go into the flat intermediate directory
+# for linking purposes
+ifneq ($(filter SHARED_LIBRARIES,$(LOCAL_MODULE_CLASS)),)
+OVERRIDE_BUILT_MODULE_PATH := $(TARGET_OUT_INTERMEDIATE_LIBRARIES)
+endif
+
+endif
+#END IKMAIN-1827
+
 ifneq ($(filter APPS,$(LOCAL_MODULE_CLASS)),)
+ifeq ($(LOCAL_DEX_PREOPT),true)
+# Make sure the boot jars get dexpreopt-ed first
+$(built_module): $(DEXPREOPT_BOOT_ODEXS) | $(DEXPREOPT) $(DEXOPT) $(AAPT)
+endif
 ifeq ($(LOCAL_CERTIFICATE),PRESIGNED)
 # Ensure that presigned .apks have been aligned.
 $(built_module) : $(LOCAL_PATH)/$(LOCAL_SRC_FILES) | $(ZIPALIGN)
@@ -107,6 +135,14 @@ $(built_module) : $(LOCAL_PATH)/$(LOCAL_SRC_FILES) | $(ACP) $(ZIPALIGN) $(SIGNAP
 	$(transform-prebuilt-to-target)
 	$(sign-package)
 	$(align-package)
+endif
+ifeq ($(LOCAL_DEX_PREOPT),true)
+	$(hide) rm -f $(patsubst %.apk,%.odex,$@)
+	$(call dexpreopt-one-file,$@,$(patsubst %.apk,%.odex,$@))
+	$(call dexpreopt-remove-classes.dex,$@)
+
+built_odex := $(basename $(built_module)).odex
+$(built_odex): $(built_module)
 endif
 else
 ifneq ($(LOCAL_PREBUILT_STRIP_COMMENTS),)

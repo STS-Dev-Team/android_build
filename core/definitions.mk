@@ -1451,8 +1451,10 @@ $(hide) $(1) -encoding UTF-8 \
     $(addprefix -classpath ,$(strip \
         $(call normalize-path-list,$(PRIVATE_ALL_JAVA_LIBRARIES)))) \
     $(if $(findstring true,$(LOCAL_WARNINGS_ENABLE)),$(xlint_unchecked),) \
+    $(strip $(PRIVATE_JAVA_SOURCE_PATH)) \
     -extdirs "" -d $(PRIVATE_CLASS_INTERMEDIATES_DIR) \
     $(PRIVATE_JAVACFLAGS) \
+    $(strip $(PRIVATE_JAVA_SOURCE_PATH)) \
     \@$(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq \
     || ( rm -rf $(PRIVATE_CLASS_INTERMEDIATES_DIR) ; exit 41 )
 $(hide) rm -f $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list
@@ -1525,7 +1527,7 @@ define transform-classes.jar-to-dex
 @echo "target Dex: $(PRIVATE_MODULE)"
 @mkdir -p $(dir $@)
 $(hide) $(DX) \
-    $(if $(findstring windows,$(HOST_OS)),,-JXms16M -JXmx1536M) \
+    $(if $(findstring windows,$(HOST_OS)),,-JXms16M -JXmx2048M) \
     --dex --output=$@ \
     $(incremental_dex) \
     $(if $(NO_OPTIMIZE_DX), \
@@ -1845,9 +1847,9 @@ endif
 # spare area for each page).
 # $(1): the partition data size
 define image-size-from-data-size
-$(strip $(eval _isfds_value := $$(shell echo $$$$(($(1) / $(BOARD_NAND_PAGE_SIZE) * \
-  ($(BOARD_NAND_PAGE_SIZE)+$(BOARD_NAND_SPARE_SIZE))))))\
-$(if $(filter 0, $(_isfds_value)),$(shell echo $$(($(BOARD_NAND_PAGE_SIZE)+$(BOARD_NAND_SPARE_SIZE)))),$(_isfds_value))\
+$(strip $(eval _isfds_value := $$(shell echo $$$$(($(1) / $(BOARD_KERNEL_PAGESIZE) * \
+  ($(BOARD_KERNEL_PAGESIZE)+$(BOARD_KERNEL_SPARESIZE))))))\
+$(if $(filter 0, $(_isfds_value)),$(shell echo $$(($(BOARD_KERNEL_PAGESIZE)+$(BOARD_KERNEL_SPARESIZE)))),$(_isfds_value))\
 $(eval _isfds_value :=))
 endef
 

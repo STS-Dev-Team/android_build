@@ -90,12 +90,26 @@ endif
 BUILD_VERSION_TAGS := $(subst $(space),$(comma),$(sort $(BUILD_VERSION_TAGS)))
 
 # A human-readable string that descibes this build in detail.
+ifeq ($(USE_GMS_ALL),false)
 build_desc := $(TARGET_PRODUCT)-$(TARGET_BUILD_VARIANT) $(PLATFORM_VERSION) $(BUILD_ID) $(BUILD_NUMBER) $(BUILD_VERSION_TAGS)
+else
+build_desc := $(TARGET_PRODUCT)-userdebug_gms $(PLATFORM_VERSION) $(BUILD_ID) $(BUILD_NUMBER) $(BUILD_VERSION_TAGS)
+endif
 $(INSTALLED_BUILD_PROP_TARGET): PRIVATE_BUILD_DESC := $(build_desc)
 
 # The string used to uniquely identify this build;  used by the OTA server.
 ifeq (,$(strip $(BUILD_FINGERPRINT)))
-  BUILD_FINGERPRINT := $(PRODUCT_BRAND)/$(TARGET_PRODUCT)/$(TARGET_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER):$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)
+# BEGIN Motorola, w20500, 12/15/2011, IKHSS7-152/fix CTS issue for test android.os.cts.BuildVersionTest#testBuildFingerprint
+  ifeq (,$(TARGET_PRODUCT_NAME))
+    TARGET_PRODUCT_NAME=$(TARGET_PRODUCT)
+  endif
+
+  ifeq ($(USE_GMS_ALL),false)
+    BUILD_FINGERPRINT := $(PRODUCT_BRAND)/$(TARGET_PRODUCT_NAME)/$(TARGET_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER):$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)
+  else
+    BUILD_FINGERPRINT := $(PRODUCT_BRAND)/$(TARGET_PRODUCT_NAME)/$(TARGET_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER):userdebug_gms/$(BUILD_VERSION_TAGS)
+  endif
+# End IKHSS7-152
 endif
 ifneq ($(words $(BUILD_FINGERPRINT)),1)
   $(error BUILD_FINGERPRINT cannot contain spaces: "$(BUILD_FINGERPRINT)")
@@ -143,12 +157,20 @@ $(if $(product_property_overrides_locale_region),,$(word 2, $(call default-local
 endef
 
 BUILDINFO_SH := build/tools/buildinfo.sh
+
+# BEGIN MOT GB UPMERGE, a18772, 12/24/2010
+# Motorola - BEGIN - e11641
+# Always build INSTALLED_BUILD_PROP_TARGET so it gets the current timestamp
+.PHONY: $(INSTALLED_BUILD_PROP_TARGET)
+# Motorola - END - e11641
+# END MOT GB UPMERGE, a18772, 12/24/2010
+
 $(INSTALLED_BUILD_PROP_TARGET): $(BUILDINFO_SH) $(INTERNAL_BUILD_ID_MAKEFILE) $(BUILD_SYSTEM)/version_defaults.mk $(wildcard $(TARGET_DEVICE_DIR)/system.prop)
 	@echo Target buildinfo: $@
 	@mkdir -p $(dir $@)
 	$(hide) TARGET_BUILD_TYPE="$(TARGET_BUILD_VARIANT)" \
 			TARGET_DEVICE="$(TARGET_DEVICE)" \
-			PRODUCT_NAME="$(TARGET_PRODUCT)" \
+			TARGET_PRODUCT_NAME="$(TARGET_PRODUCT_NAME)" \
 			PRODUCT_BRAND="$(PRODUCT_BRAND)" \
 			PRODUCT_DEFAULT_LANGUAGE="$(call default-locale-language,$(PRODUCT_LOCALES))" \
 			PRODUCT_DEFAULT_REGION="$(call default-locale-region,$(PRODUCT_LOCALES))" \
@@ -238,17 +260,22 @@ APKCERTS_FILE := $(intermediates)/$(name).txt
 # We don't need to really build all the modules.
 # TODO: rebuild APKCERTS_FILE if any app change its cert.
 $(APKCERTS_FILE):
+# Motorola BEGIN IKMAIN-11896 - Fixing "Arg list too long" issue
+# Depending on the built packages isn't exactly right,
+# but it should guarantee that the apkcerts file is rebuilt
+# if any packages change which certs they're signed with.
 	@echo APK certs list: $@
 	@mkdir -p $(dir $@)
 	@rm -f $@
-	$(hide) $(foreach p,$(PACKAGES),\
+	$(hide) APKCERTS_FILE=$(APKCERTS_FILE); $(foreach p,$(PACKAGES),\
           $(if $(PACKAGES.$(p).EXTERNAL_KEY),\
 	    echo 'name="$(p).apk" certificate="EXTERNAL" \
-	         private_key=""' >> $@;,\
+	         private_key=""' >> $${APKCERTS_FILE};,\
 	    echo 'name="$(p).apk" certificate="$(PACKAGES.$(p).CERTIFICATE)" \
-	         private_key="$(PACKAGES.$(p).PRIVATE_KEY)"' >> $@;))
+	         private_key="$(PACKAGES.$(p).PRIVATE_KEY)"' >> $${APKCERTS_FILE};))
 	# In case $(PACKAGES) is empty.
 	$(hide) touch $@
+# Motorola END IKMAIN-11896
 
 .PHONY: apkcerts-list
 apkcerts-list: $(APKCERTS_FILE)
@@ -377,6 +404,13 @@ endif
 
 INSTALLED_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.img
 
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+ifeq ($(INTEL_BOOTIMG),)
+INSTALLED_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.bin
+endif
+endif
+
+ifeq ($(INSTALLED_BOOTIMAGE_TARGET),$(PRODUCT_OUT)/boot.img)
 ifeq ($(TARGET_BOOTIMAGE_USE_EXT2),true)
 tmp_dir_for_image := $(call intermediates-dir-for,EXECUTABLES,boot_img)/bootimg
 INTERNAL_BOOTIMAGE_ARGS += --tmpdir $(tmp_dir_for_image)
@@ -392,6 +426,7 @@ $(INSTALLED_BOOTIMAGE_TARGET): $(MKBOOTIMG) $(INTERNAL_BOOTIMAGE_FILES)
 	$(hide) $(MKBOOTIMG) $(INTERNAL_BOOTIMAGE_ARGS) --output $@
 	$(hide) $(call assert-max-image-size,$@,$(BOARD_BOOTIMAGE_PARTITION_SIZE),raw)
 endif # TARGET_BOOTIMAGE_USE_EXT2
+endif
 
 else	# TARGET_NO_KERNEL
 # HACK: The top-level targets depend on the bootimage.  Not all targets
@@ -568,7 +603,13 @@ $(kernel_notice_file): \
 # before the rules that use that variable to build the image.
 ALL_DEFAULT_INSTALLED_MODULES += $(TARGET_OUT_ETC)/security/otacerts.zip
 $(TARGET_OUT_ETC)/security/otacerts.zip: KEY_CERT_PAIR := $(DEFAULT_KEY_CERT_PAIR)
+ifeq ($(USE_TEST_PUBLIC_KEYS),true)
 $(TARGET_OUT_ETC)/security/otacerts.zip: $(addsuffix .x509.pem,$(DEFAULT_KEY_CERT_PAIR))
+else ifeq ($(MOT_OTA_PUBLIC_KEYS),)
+$(TARGET_OUT_ETC)/security/otacerts.zip: $(addsuffix .x509.pem,$(DEFAULT_KEY_CERT_PAIR))
+else
+$(TARGET_OUT_ETC)/security/otacerts.zip: $(MOT_OTA_PUBLIC_KEYS)
+endif
 	$(hide) rm -f $@
 	$(hide) mkdir -p $(dir $@)
 	$(hide) zip -qj $@ $<
@@ -587,6 +628,7 @@ INTERNAL_USERIMAGES_USE_EXT := true
 INTERNAL_USERIMAGES_EXT_VARIANT := ext2
 else
 ifeq ($(TARGET_USERIMAGES_USE_EXT3),true)
+include external/genext2fs/Config.mk
 INTERNAL_USERIMAGES_USE_EXT := true
 INTERNAL_USERIMAGES_EXT_VARIANT := ext3
 else
@@ -603,6 +645,14 @@ endif
 
 ifeq ($(INTERNAL_USERIMAGES_USE_EXT),true)
 INTERNAL_USERIMAGES_DEPS := $(MKEXTUSERIMG) $(MAKE_EXT4FS)
+
+ifeq ($(INTERNAL_USERIMAGES_EXT_VARIANT),ext3)
+# Dependencies for generating ext3 images using build-userimage-ext2-target
+# from external/genext2fs/Config.mk
+# Dependencies for ext4 generation above are not needed
+INTERNAL_USERIMAGES_DEPS := $(MKEXT2IMG) $(TUNE2FS) $(E2FSCK)
+endif
+
 INTERNAL_USERIMAGES_BINARY_PATHS := $(sort $(dir $(INTERNAL_USERIMAGES_DEPS)))
 
 # $(1): src directory
@@ -613,7 +663,7 @@ INTERNAL_USERIMAGES_BINARY_PATHS := $(sort $(dir $(INTERNAL_USERIMAGES_DEPS)))
 define build-userimage-ext-target
   @mkdir -p $(dir $(2))
   $(hide) PATH=$(foreach p,$(INTERNAL_USERIMAGES_BINARY_PATHS),$(p):)$$PATH \
-	  $(MKEXTUSERIMG) $(INTERNAL_USERIMAGES_SPARSE_EXT_FLAG) $(1) $(2) $(4) $(3) $(5)
+	   $(MKEXTUSERIMG) $(INTERNAL_USERIMAGES_SPARSE_EXT_FLAG) $(1) $(2) $(4) $(3) $(5)
 endef
 else
 INTERNAL_USERIMAGES_DEPS := $(MKYAFFS2)
@@ -625,42 +675,104 @@ endif
 # If neither TARGET_NO_KERNEL nor TARGET_NO_RECOVERY are true
 ifeq (,$(filter true, $(TARGET_NO_KERNEL) $(TARGET_NO_RECOVERY) $(BUILD_TINY_ANDROID)))
 
+# Motorola BEGIN - jsuttles - IKMAIN-5682
+# This is needed for rapid SBF building
+ifeq ($(INSTALLED_KERNEL_TARGET),)
+	INSTALLED_KERNEL_TARGET := $(PRODUCT_OUT)/kernel
+endif
+# END - IKMAIN-5682
+
+# Motorola BEGIN - e11455 - IKBPINTSTE-30
+# Add product specific init.rc to recovery image
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+recovery_initrc := $(call include-path-for, recovery)/etc/intel/init.rc
+else
+recovery_initrc := $(call include-path-for, recovery)/etc/init.rc $(TARGET_RECOVERY_INITRC)
+endif
+# END - IKBPINTSTE-30
 INSTALLED_RECOVERYIMAGE_TARGET := $(PRODUCT_OUT)/recovery.img
 
-recovery_initrc := $(call include-path-for, recovery)/etc/init.rc
 recovery_kernel := $(INSTALLED_KERNEL_TARGET) # same as a non-recovery system
 recovery_ramdisk := $(PRODUCT_OUT)/ramdisk-recovery.img
 recovery_build_prop := $(INSTALLED_BUILD_PROP_TARGET)
-recovery_binary := $(call intermediates-dir-for,EXECUTABLES,recovery)/recovery
 recovery_resources_common := $(call include-path-for, recovery)/res
-recovery_resources_private := $(strip $(wildcard $(TARGET_DEVICE_DIR)/recovery/res))
 recovery_resource_deps := $(shell find $(recovery_resources_common) \
   $(recovery_resources_private) -type f)
 recovery_fstab := $(strip $(wildcard $(TARGET_DEVICE_DIR)/recovery.fstab))
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+  recovery_resources_private := $(strip $(wildcard $(TARGET_DEVICE_DIR)/fastboot/res))
+  recovery_binaries := $(call intermediates-dir-for,EXECUTABLES,recovery)/recovery
+  fastboot_binary := $(call intermediates-dir-for,EXECUTABLES,fastboot)/fastboot
+  recovery_logcat := $(call intermediates-dir-for,EXECUTABLES,logcat_static)/logcat_static
+  recovery_watchdogd := $(call intermediates-dir-for,EXECUTABLES,watchdogd)/watchdogd
+else
+  recovery_mmc_fstab := $(strip $(wildcard $(TARGET_DEVICE_DIR)/recovery_mmc.fstab))
+  recovery_resources_private := $(strip $(wildcard $(TARGET_DEVICE_DIR)/recovery/res))
+  recovery_binaries := $(foreach item,recovery $(TARGET_RECOVERY_EXECUTABLES), \
+        $(call intermediates-dir-for,EXECUTABLES,$(item))/$(item))
+endif
+
+
+# Motorola BEGIN - e11455 - IKBPINTSTE-30
+# Add product specific files to recovery image
+recovery_etc := $(strip $(wildcard $(TARGET_DEVICE_DIR)/recovery.fstab)) $(TARGET_RECOVERY_ETC)
+recovery_libs := $(foreach item,$(TARGET_RECOVERY_SHARED_LIBS), $(TARGET_OUT_INTERMEDIATE_LIBRARIES)/$(item))
+recovery_modules := $(foreach item,$(TARGET_RECOVERY_MODULES), $(MOTO_MOD_INSTALL)/$(item))
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+recovery_modem_download_tool :=  $(call intermediates-dir-for,EXECUTABLES,cmfwdl-app)/cmfwdl-app
+recovery_modem_proxy_tool := $(call intermediates-dir-for,EXECUTABLES,proxy-recovery)/proxy-recovery
+else
+recovery_modem_download_tool :=
+recovery_modem_proxy_tool :=
+endif
+
+# END - IKBPINTSTE-30
 
 ifeq ($(recovery_resources_private),)
   $(info No private recovery resources for TARGET_DEVICE $(TARGET_DEVICE))
 endif
 
-ifeq ($(recovery_fstab),)
+# Motorola BEGIN - e11455 - IKBPINTSTE-30
+# Add product specific etc files to recovery image
+ifeq ($(findstring recovery.fstab, $(recovery_etc)),)
   $(info No recovery.fstab for TARGET_DEVICE $(TARGET_DEVICE))
 endif
+# END - IKBPINTSTE-30
 
 INTERNAL_RECOVERYIMAGE_ARGS := \
 	$(addprefix --second ,$(INSTALLED_2NDBOOTLOADER_TARGET)) \
 	--kernel $(recovery_kernel) \
 	--ramdisk $(recovery_ramdisk)
 
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+INTERNAL_RECOVERYIMAGE_ARGS += --product $(TARGET_PRODUCT)
+ifeq ($(TARGET_USE_3IMAGES),true)
+INTERNAL_RECOVERYIMAGE_ARGS += --type recovery
+else
+INTERNAL_RECOVERYIMAGE_ARGS += --type combined
+endif
+endif
+
 # Assumes this has already been stripped
 ifdef BOARD_KERNEL_CMDLINE
-  INTERNAL_RECOVERYIMAGE_ARGS += --cmdline "$(BOARD_KERNEL_CMDLINE)"
+  INTERNAL_RECOVERYIMAGE_ARGS += --cmdline "$(BOARD_KERNEL_CMDLINE) $(BOARD_KERNEL_RECOVERY_EXTRA_CMDLINE)"
 endif
+ifdef BOARD_RECOVERY_CMDLINE
+  INTERNAL_RECOVERYIMAGE_ARGS += --cmdline "$(BOARD_RECOVERY_CMDLINE)"
+endif
+#Motorola - END - IKSTABLETWOV-1408 - 10/07/2010
 ifdef BOARD_KERNEL_BASE
   INTERNAL_RECOVERYIMAGE_ARGS += --base $(BOARD_KERNEL_BASE)
 endif
 BOARD_KERNEL_PAGESIZE := $(strip $(BOARD_KERNEL_PAGESIZE))
 ifdef BOARD_KERNEL_PAGESIZE
   INTERNAL_RECOVERYIMAGE_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
+endif
+
+ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
+INSTALLED_BOOTIMAGE_TARGET := $(PRODUCT_OUT)/boot.img
+kernel: $(INSTALLED_BOOTIMAGE_TARGET)
+.PHONY: kernel
 endif
 
 # Keys authorized to sign OTA packages this build will accept.  The
@@ -673,7 +785,13 @@ OTA_PUBLIC_KEYS := $(DEFAULT_SYSTEM_DEV_CERTIFICATE).x509.pem
 RECOVERY_INSTALL_OTA_KEYS := \
 	$(call intermediates-dir-for,PACKAGING,ota_keys)/keys
 DUMPKEY_JAR := $(HOST_OUT_JAVA_LIBRARIES)/dumpkey.jar
+ifeq ($(USE_TEST_PUBLIC_KEYS),true)
 $(RECOVERY_INSTALL_OTA_KEYS): PRIVATE_OTA_PUBLIC_KEYS := $(OTA_PUBLIC_KEYS)
+else ifeq ($(MOT_OTA_PUBLIC_KEYS),)
+$(RECOVERY_INSTALL_OTA_KEYS): PRIVATE_OTA_PUBLIC_KEYS := $(OTA_PUBLIC_KEYS)
+else
+$(RECOVERY_INSTALL_OTA_KEYS): PRIVATE_OTA_PUBLIC_KEYS := $(MOT_OTA_PUBLIC_KEYS)
+endif
 $(RECOVERY_INSTALL_OTA_KEYS): extra_keys := $(patsubst %,%.x509.pem,$(PRODUCT_EXTRA_RECOVERY_KEYS))
 $(RECOVERY_INSTALL_OTA_KEYS): $(OTA_PUBLIC_KEYS) $(DUMPKEY_JAR) $(extra_keys)
 	@echo "DumpPublicKey: $@ <= $(PRIVATE_OTA_PUBLIC_KEYS) $(extra_keys)"
@@ -681,30 +799,66 @@ $(RECOVERY_INSTALL_OTA_KEYS): $(OTA_PUBLIC_KEYS) $(DUMPKEY_JAR) $(extra_keys)
 	@mkdir -p $(dir $@)
 	java -jar $(DUMPKEY_JAR) $(PRIVATE_OTA_PUBLIC_KEYS) $(extra_keys) > $@
 
+        # Motorola BEGIN - e11455 - IKBPINTSTE-30
+        # Add product specific files to recovery image
 $(INSTALLED_RECOVERYIMAGE_TARGET): $(MKBOOTFS) $(MKBOOTIMG) $(MINIGZIP) \
 		$(INSTALLED_RAMDISK_TARGET) \
 		$(INSTALLED_BOOTIMAGE_TARGET) \
-		$(recovery_binary) \
+		$(recovery_binaries) \
+		$(fastboot_binary) \
+		$(recovery_watchdogd) \
+		$(recovery_modem_download_tool) \
+		$(recovery_modem_proxy_tool) \
 		$(recovery_initrc) $(recovery_kernel) \
+		$(recovery_logcat) \
 		$(INSTALLED_2NDBOOTLOADER_TARGET) \
 		$(recovery_build_prop) $(recovery_resource_deps) \
-		$(recovery_fstab) \
-		$(RECOVERY_INSTALL_OTA_KEYS)
+		$(recovery_etc) $(recovery_libs) $(TARGET_DUMMY_MODULE) \
+		$(RECOVERY_INSTALL_OTA_KEYS) \
+		$(recovery_fstab)
+	# END - IKBPINTSTE-30
 	@echo ----- Making recovery image ------
 	rm -rf $(TARGET_RECOVERY_OUT)
 	mkdir -p $(TARGET_RECOVERY_OUT)
 	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)
 	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/etc
 	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/tmp
+	# Motorola BEGIN - e11455 - IKBPINTSTE-30
+	# Add product specific files to recovery image
+	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/vendor/lib/modules
+	# END - IKBPINTSTE-30
 	echo Copying baseline ramdisk...
 	cp -R $(TARGET_ROOT_OUT) $(TARGET_RECOVERY_OUT)
 	rm $(TARGET_RECOVERY_ROOT_OUT)/init*.rc
 	echo Modifying ramdisk contents...
 	cp -f $(recovery_initrc) $(TARGET_RECOVERY_ROOT_OUT)/
-	cp -f $(recovery_binary) $(TARGET_RECOVERY_ROOT_OUT)/sbin/
+	cp -f $(recovery_binaries) $(TARGET_RECOVERY_ROOT_OUT)/sbin/
 	cp -rf $(recovery_resources_common) $(TARGET_RECOVERY_ROOT_OUT)/
 	$(foreach item,$(recovery_resources_private), \
 	  cp -rf $(item) $(TARGET_RECOVERY_ROOT_OUT)/)
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+ifneq ($(TARGET_USE_3IMAGES),true)
+	sed -i 's|/sbin/recovery|/sbin/fastboot|' $(TARGET_RECOVERY_ROOT_OUT)/init.rc
+	cp -f $(fastboot_binary) $(TARGET_RECOVERY_ROOT_OUT)/sbin/
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+	cp -f $(recovery_modem_download_tool) $(TARGET_RECOVERY_ROOT_OUT)/sbin/
+	cp -f $(recovery_modem_proxy_tool) $(TARGET_RECOVERY_ROOT_OUT)/sbin/proxy
+endif
+endif
+	cp -f $(recovery_logcat) $(TARGET_RECOVERY_ROOT_OUT)/sbin/logcat
+	cp -f $(recovery_watchdogd) $(TARGET_RECOVERY_ROOT_OUT)/sbin/
+else
+	# Motorola BEGIN - e11455 - IKBPINTSTE-30
+	# Add product specific files to recovery image
+	cp -f $(recovery_etc) $(TARGET_RECOVERY_ROOT_OUT)/etc/
+	$(foreach item,$(recovery_libs), \
+	  cp -f $(item) $(TARGET_RECOVERY_ROOT_OUT)/vendor/lib/;)
+	$(foreach item,$(recovery_modules), \
+	  cp -f $(item) $(TARGET_RECOVERY_ROOT_OUT)/vendor/lib/modules/;)
+	# END - IKBPINTSTE-30
+	$(foreach item,$(recovery_mmc_fstab), \
+	  cp -f $(item) $(TARGET_RECOVERY_ROOT_OUT)/etc/recovery_mmc.fstab)
+endif
 	$(foreach item,$(recovery_fstab), \
 	  cp -f $(item) $(TARGET_RECOVERY_ROOT_OUT)/etc/recovery.fstab)
 	cp $(RECOVERY_INSTALL_OTA_KEYS) $(TARGET_RECOVERY_ROOT_OUT)/res/keys
@@ -722,6 +876,264 @@ endif
 .PHONY: recoveryimage
 recoveryimage: $(INSTALLED_RECOVERYIMAGE_TARGET)
 
+ifneq ($(BOARD_KERNEL_PAGESIZE),)
+mkyaffs2_extra_flags := -c $(BOARD_KERNEL_PAGESIZE)
+else
+mkyaffs2_extra_flags :=
+BOARD_KERNEL_PAGESIZE := 2048
+endif
+
+ifneq ($(BOARD_KERNEL_SPARESIZE),)
+mkyaffs2_extra_flags += -s $(BOARD_KERNEL_SPARESIZE)
+else
+BOARD_KERNEL_SPARESIZE := 64
+endif
+
+# -----------------------------------------------------------------
+# fastboot image
+
+ifeq ($(TARGET_USE_FASTBOOT),true)
+
+INSTALLED_FASTBOOTIMAGE_TARGET := $(PRODUCT_OUT)/fastboot.img
+
+fastboot_initrc := $(call include-path-for, fastboot)/etc/init.rc
+fastboot_kernel := $(INSTALLED_KERNEL_TARGET) # same as a non-recovery system
+fastboot_ramdisk := $(PRODUCT_OUT)/ramdisk-fastboot.img
+fastboot_build_prop := $(INSTALLED_BUILD_PROP_TARGET)
+fastboot_binary := $(call intermediates-dir-for,EXECUTABLES,fastboot)/fastboot
+fastboot_watchdogd := $(call intermediates-dir-for,EXECUTABLES,watchdogd)/watchdogd
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+fastboot_modem_download_tool :=  $(call intermediates-dir-for,EXECUTABLES,cmfwdl-app)/cmfwdl-app
+else
+fastboot_modem_download_tool :=
+endif
+fastboot_logcat := $(call intermediates-dir-for,EXECUTABLES,logcat_static)/logcat_static
+fastboot_resources_common := $(call include-path-for, fastboot)/res
+fastboot_fstab := $(strip $(wildcard $(TARGET_DEVICE_DIR)/fstab))
+
+ifeq ($(fastboot_fstab),)
+  $(info No recovery.fstab for TARGET_DEVICE $(TARGET_DEVICE))
+endif
+
+INTERNAL_FASTBOOTIMAGE_ARGS := \
+        $(addprefix --second ,$(INSTALLED_2NDBOOTLOADER_TARGET)) \
+        --kernel $(fastboot_kernel) \
+        --ramdisk $(fastboot_ramdisk)
+
+INTERNAL_FASTBOOTIMAGE_ARGS += --product $(TARGET_PRODUCT)
+INTERNAL_FASTBOOTIMAGE_ARGS += --type fastboot
+
+# Assumes this has already been stripped
+ifdef BOARD_KERNEL_CMDLINE
+  INTERNAL_FASTBOOTIMAGE_ARGS += --cmdline "$(BOARD_KERNEL_CMDLINE) $(BOARD_KERNEL_FASTBOOT_EXTRA_CMDLINE)"
+endif
+ifdef BOARD_KERNEL_BASE
+  INTERNAL_FASTBOOTIMAGE_ARGS += --base $(BOARD_KERNEL_BASE)
+endif
+BOARD_KERNEL_PAGESIZE := $(strip $(BOARD_KERNEL_PAGESIZE))
+ifdef BOARD_KERNEL_PAGESIZE
+  INTERNAL_FASTBOOTIMAGE_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
+endif
+
+$(INSTALLED_FASTBOOTIMAGE_TARGET): $(MKBOOTFS) $(MKBOOTIMG) $(MINIGZIP) \
+                $(INSTALLED_RAMDISK_TARGET) \
+                $(INSTALLED_BOOTIMAGE_TARGET) \
+                $(fastboot_binary) \
+                $(fastboot_watchdogd) \
+                $(fastboot_modem_download_tool) \
+                $(fastboot_initrc) $(fastboot_kernel) \
+                $(fastboot_logcat) \
+                $(fastboot_build_prop) \
+                $(fastboot_fstab)
+	@echo ----- Making fastboot image ------
+	rm -rf $(TARGET_FASTBOOT_OUT)
+	mkdir -p $(TARGET_FASTBOOT_OUT)
+	mkdir -p $(TARGET_FASTBOOT_ROOT_OUT)
+	mkdir -p $(TARGET_FASTBOOT_ROOT_OUT)/tmp
+	mkdir -p $(TARGET_FASTBOOT_ROOT_OUT)/etc
+	mkdir -p $(TARGET_FASTBOOT_ROOT_OUT)/sbin
+	echo Copying baseline ramdisk...
+	cp -R $(TARGET_ROOT_OUT) $(TARGET_FASTBOOT_OUT)
+	rm $(TARGET_FASTBOOT_ROOT_OUT)/init*.rc
+	echo Modifying ramdisk contents...
+	cp -f $(fastboot_initrc) $(TARGET_FASTBOOT_ROOT_OUT)/
+	cp -f $(fastboot_binary) $(TARGET_FASTBOOT_ROOT_OUT)/sbin/
+	cp -f $(fastboot_watchdogd) $(TARGET_FASTBOOT_ROOT_OUT)/sbin/
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+	cp -f $(fastboot_modem_download_tool) $(TARGET_FASTBOOT_ROOT_OUT)/sbin/
+endif
+	cp -f $(fastboot_logcat) $(TARGET_FASTBOOT_ROOT_OUT)/sbin/logcat
+	cp -rf $(fastboot_resources_common) $(TARGET_FASTBOOT_ROOT_OUT)/
+	cp -f $(fastboot_fstab) $(TARGET_FASTBOOT_ROOT_OUT)/etc/recovery.fstab
+	cat $(INSTALLED_DEFAULT_PROP_TARGET) $(fastboot_build_prop) \
+                > $(TARGET_FASTBOOT_ROOT_OUT)/default.prop
+	$(MKBOOTFS) $(TARGET_FASTBOOT_ROOT_OUT) | $(MINIGZIP) > $(fastboot_ramdisk)
+	$(MKBOOTIMG) $(INTERNAL_FASTBOOTIMAGE_ARGS) --output $@
+	@echo ----- Made fastboot image -------- $@
+
+else
+INSTALLED_FASTBOOTIMAGE_TARGET :=
+endif
+
+.PHONY: fastbootimage
+fastbootimage: $(INSTALLED_FASTBOOTIMAGE_TARGET)
+
+# droidboot image
+
+ifeq ($(TARGET_USE_DROIDBOOT),true)
+
+INSTALLED_DROIDBOOTIMAGE_TARGET := $(PRODUCT_OUT)/mbm-ci/droidboot.img
+
+droidboot_initrc := bootable/droidboot/init.rc
+droidboot_kernel := $(PRODUCT_OUT)/droidboot_kernel
+droidboot_ramdisk := $(PRODUCT_OUT)/ramdisk-droidboot.img
+droidboot_kernel_modules := $(PRODUCT_OUT)/droidboot_modules
+droidboot_build_prop := $(INSTALLED_BUILD_PROP_TARGET)
+droidboot_binary := $(call intermediates-dir-for,EXECUTABLES,droidboot)/droidboot
+droidboot_watchdogd := $(call intermediates-dir-for,EXECUTABLES,watchdogd)/watchdogd
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+droidboot_modem_download_tool :=  $(call intermediates-dir-for,EXECUTABLES,cmfwdl-app)/cmfwdl-app
+droidboot_modem_proxy_tool := $(call intermediates-dir-for,EXECUTABLES,proxy-recovery)/proxy-recovery
+else
+droidboot_modem_download_tool :=
+droidboot_modem_proxy_tool :=
+endif
+droidboot_logcat := $(call intermediates-dir-for,EXECUTABLES,logcat)/logcat
+droidboot_repolist := bootable/droidboot/repo.lst
+droidboot_make_ext4fs := $(call intermediates-dir-for,EXECUTABLES,make_ext4fs)/make_ext4fs
+droidboot_image_verify:= $(call intermediates-dir-for,EXECUTABLES,CC6_SIGNED_IMAGE_VERIFY)/CC6_SIGNED_IMAGE_VERIFY
+droidboot_fstab := $(strip $(wildcard $(TARGET_DEVICE_DIR)/fstab))
+droidboot_prebuilt := device/moto/intel_mfld/prebuilts/mbm
+
+droidboot_modules := \
+        libc \
+        libcutils \
+        libdl \
+        liblog \
+        libm \
+        libstdc++ \
+        linker \
+        mksh \
+        systembinsh \
+        toolbox \
+        libdiskconfig \
+        libext2fs \
+        libext2_com_err \
+        libext2_e2p \
+        libext2_blkid \
+        libext2_uuid \
+        libext2_profile \
+        libext4_utils \
+        libusbhost \
+        libz \
+        resize2fs \
+        tune2fs \
+        e2fsck \
+        gzip \
+        kexec
+
+ifeq ($(TARGET_BUILD_VARIANT),eng)
+droidboot_modules += su
+endif
+droidboot_system_files := $(call module-installed-files,$(droidboot_modules))
+
+# $(1): source base dir
+# $(2): target base dir
+define droidboot-copy-files
+$(hide) $(foreach srcfile,$(droidboot_system_files), \
+        destfile=$(patsubst $(1)/%,$(2)/%,$(srcfile)); \
+        mkdir -p `dirname $$destfile`; \
+        cp -fR $(srcfile) $$destfile; \
+)
+endef
+ifeq ($(droidboot_fstab),)
+  $(info No recovery.fstab for TARGET_DEVICE $(TARGET_DEVICE))
+endif
+
+INTERNAL_DROIDBOOTIMAGE_ARGS := \
+        $(addprefix --second ,$(INSTALLED_2NDBOOTLOADER_TARGET)) \
+        --kernel $(droidboot_kernel) \
+        --ramdisk $(droidboot_ramdisk)
+
+INTERNAL_DROIDBOOTIMAGE_ARGS += --product $(TARGET_PRODUCT)
+INTERNAL_DROIDBOOTIMAGE_ARGS += --type droidboot
+
+# Assumes this has already been stripped
+ifdef DROIDBOOT_KERNEL_CMDLINE
+  INTERNAL_DROIDBOOTIMAGE_ARGS += --cmdline "$(DROIDBOOT_KERNEL_CMDLINE) $(BOARD_KERNEL_DROIDBOOT_EXTRA_CMDLINE)"
+endif
+ifdef BOARD_KERNEL_BASE
+  INTERNAL_DROIDBOOTIMAGE_ARGS += --base $(BOARD_KERNEL_BASE)
+endif
+BOARD_KERNEL_PAGESIZE := $(strip $(BOARD_KERNEL_PAGESIZE))
+ifdef BOARD_KERNEL_PAGESIZE
+  INTERNAL_DROIDBOOTIMAGE_ARGS += --pagesize $(BOARD_KERNEL_PAGESIZE)
+endif
+
+$(INSTALLED_DROIDBOOTIMAGE_TARGET): $(MKBOOTFS) $(MKBOOTIMG) $(MINIGZIP) \
+                $(INSTALLED_RAMDISK_TARGET) \
+                $(INSTALLED_BOOTIMAGE_TARGET) \
+                $(droidboot_system_files) \
+                $(droidboot_binary) \
+                $(droidboot_watchdogd) \
+                $(droidboot_modem_download_tool) \
+                $(droidboot_modem_proxy_tool) \
+                $(droidboot_initrc) $(droidboot_kernel) \
+                $(droidboot_logcat) \
+                $(droidboot_make_ext4fs) \
+                $(droidboot_image_verify) \
+                $(droidboot_build_prop) \
+                $(droidboot_fstab)
+	@echo ----- Making droidboot image ------
+	rm -rf $(TARGET_DROIDBOOT_OUT)
+	mkdir -p $(TARGET_DROIDBOOT_OUT)
+	mkdir -p $(TARGET_DROIDBOOT_ROOT_OUT)
+	mkdir -p $(TARGET_DROIDBOOT_ROOT_OUT)/tmp
+	mkdir -p $(TARGET_DROIDBOOT_ROOT_OUT)/system/etc
+	mkdir -p $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin
+	mkdir -p $(TARGET_DROIDBOOT_ROOT_OUT)/mnt/sdcard
+	mkdir -p $(shell dirname $@)
+	echo Copying baseline ramdisk...
+	cp -R $(TARGET_ROOT_OUT) $(TARGET_DROIDBOOT_OUT)
+	rm $(TARGET_DROIDBOOT_ROOT_OUT)/init*.rc
+	rm -rf $(TARGET_DROIDBOOT_ROOT_OUT)/lib
+	echo Modifying ramdisk contents...
+	find $(TARGET_DROIDBOOT_ROOT_OUT)/sbin/ -lname busybox | xargs rm -f
+	rm -f $(TARGET_DROIDBOOT_ROOT_OUT)/sbin/busybox
+	rm -f $(TARGET_DROIDBOOT_ROOT_OUT)/charger
+	cp -f $(droidboot_initrc) $(TARGET_DROIDBOOT_ROOT_OUT)/
+	cp -f $(droidboot_binary) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/
+	cp -f $(droidboot_watchdogd) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/
+ifeq ($(strip $(BOARD_HAVE_IFX6160)),true)
+	cp -f $(droidboot_modem_download_tool) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/
+	cp -f $(droidboot_modem_proxy_tool) $(TARGET_DROIDBOOT_ROOT_OUT)/sbin/proxy
+endif
+	cp -f $(droidboot_logcat) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/logcat
+	cp -f $(droidboot_make_ext4fs) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/make_ext4fs
+	cp -f $(droidboot_image_verify) $(TARGET_DROIDBOOT_ROOT_OUT)/system/bin/CC6_SIGNED_IMAGE_VERIFY
+	cp -f $(droidboot_fstab) $(TARGET_DROIDBOOT_ROOT_OUT)/system/etc/recovery.fstab
+	cat $(INSTALLED_DEFAULT_PROP_TARGET) $(droidboot_build_prop) \
+                > $(TARGET_DROIDBOOT_ROOT_OUT)/default.prop
+	$(hide) bootable/bootloader/boottools/manifest_gen.py -i $(droidboot_repolist) -o \
+		$(TARGET_DROIDBOOT_ROOT_OUT)/manifest.txt
+	$(hide) $(call droidboot-copy-files,$(TARGET_OUT),$(TARGET_DROIDBOOT_ROOT_OUT)/system/)
+	$(MKBOOTFS) $(TARGET_DROIDBOOT_ROOT_OUT) | $(MINIGZIP) > $(droidboot_ramdisk)
+	$(MKBOOTIMG) $(INTERNAL_DROIDBOOTIMAGE_ARGS) --output $@
+	@echo ----- Made droidboot image -------- $@
+	@echo ----- Copy prebuilt droidboot image --------
+	cp -rf $(droidboot_prebuilt) $(PRODUCT_OUT)
+	@echo ----- Making motoboot image ------
+	python bootable/bootloader/boottools/pack_intel_motoboot.py -o $(PRODUCT_OUT)/motoboot.img \
+            -v $(PRODUCT_OUT)/mbm/vendor_key_flash_package/reflash \
+            -m $(PRODUCT_OUT)/mbm/moto_key_flash_package/reflash
+
+else
+INSTALLED_DROIDBOOTIMAGE_TARGET :=
+endif
+
+.PHONY: droidbootimage
+droidbootimage: $(INSTALLED_DROIDBOOTIMAGE_TARGET)
+
 ifneq ($(BOARD_NAND_PAGE_SIZE),)
 mkyaffs2_extra_flags := -c $(BOARD_NAND_PAGE_SIZE)
 else
@@ -734,7 +1146,6 @@ mkyaffs2_extra_flags += -s $(BOARD_NAND_SPARE_SIZE)
 else
 BOARD_NAND_SPARE_SIZE := 64
 endif
-
 # -----------------------------------------------------------------
 # system image
 #
@@ -770,15 +1181,40 @@ endif
 
 systemimage_intermediates := \
 	$(call intermediates-dir-for,PACKAGING,systemimage)
+ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
+BUILT_SYSTEMIMAGE := $(systemimage_intermediates)/system.img.$(INTERNAL_USERIMAGES_EXT_VARIANT)
+else
 BUILT_SYSTEMIMAGE := $(systemimage_intermediates)/system.img
+endif
+
+ifneq ($(TARGET_BOARD_PLATFORM),mrst)
+# Motorola - Begin - e7111c - IKSTABLETWOV-1577
+$(DEFAULT_NIPTUCK_TARGET): $(INTERNAL_SYSTEMIMAGE_FILES)
+# Motorola - End - e7111c - IKSTABLETWOV-1577
+
+ifneq ($(filter user userdebug,$(TARGET_BUILD_VARIANT)),)
+  SYSTEM_IMAGE_PART_SIZE := $(BOARD_SYSTEMIMAGE_PARTITION_SIZE)
+endif
+endif
+
+# Motorola BEGIN - cdv001 - IKSECURITY-71 (create whitelist)
+$(QE_WHITELIST_UNSIGNED): $(INTERNAL_SYSTEMIMAGE_FILES)
+# Motorola END - cdv001 - IKSECURITY-71
 
 ifeq ($(INTERNAL_USERIMAGES_USE_EXT),true)
+ifeq ($(TARGET_USERIMAGES_USE_EXT3),true)
+define build-systemimage-target
+    @echo "Target system fs image: $(1)"
+    $(call build-userimage-ext2-target,$(TARGET_OUT),$(1),system,journal,$(BOARD_SYSTEMIMAGE_PARTITION_SIZE))
+endef
+else
 ## generate an ext image
 # $(1): output file
 define build-systemimage-target
     @echo "Target system fs image: $(1)"
     $(call build-userimage-ext-target,$(TARGET_OUT),$(1),system,$(INTERNAL_USERIMAGES_EXT_VARIANT),$(BOARD_SYSTEMIMAGE_PARTITION_SIZE))
 endef
+endif
 
 else # INTERNAL_USERIMAGES_USE_EXT != true
 
@@ -788,13 +1224,29 @@ define build-systemimage-target
     @echo "Target system fs image: $(1)"
     @mkdir -p $(dir $(1))
     $(hide) $(MKYAFFS2) -f $(mkyaffs2_extra_flags) $(TARGET_OUT) $(1)
+    $(hide) chmod a+r $(1)
 endef
 endif # INTERNAL_USERIMAGES_USE_EXT
 
-$(BUILT_SYSTEMIMAGE): $(FULL_SYSTEMIMAGE_DEPS) $(INSTALLED_FILES_FILE)
+# Motorola BEGIN - cdv001 - IKSECURITY-71 (add whitelist)
+#BEGIN Motorola IKHSS7-588 12/20/2012 tbdc37 added DEFAULT_NIPTUCK_TARGET dependency
+ifneq ($(TARGET_BOARD_PLATFORM),mrst)
+$(BUILT_SYSTEMIMAGE): $(FULL_SYSTEMIMAGE_DEPS) $(INSTALLED_FILES_FILE) $(DEFAULT_NIPTUCK_TARGET) $(QE_WHITELIST)
 	$(call build-systemimage-target,$@)
+#END Motorola IKHSS7-588 12/20/2012 tbdc37
+# Motorola END - cdv001 - IKSECURITY-71
+else
+# Motorola BEGIN - cdv001 - IKSECURITY-71 (add whitelist)
+$(BUILT_SYSTEMIMAGE): $(FULL_SYSTEMIMAGE_DEPS) $(INSTALLED_FILES_FILE) $(QE_WHITELIST)
+	$(call build-systemimage-target,$@)
+endif
+# Motorola END - cdv001 - IKSECURITY-71
 
+ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
+INSTALLED_SYSTEMIMAGE := $(PRODUCT_OUT)/system.img.$(INTERNAL_USERIMAGES_EXT_VARIANT)
+else
 INSTALLED_SYSTEMIMAGE := $(PRODUCT_OUT)/system.img
+endif
 SYSTEMIMAGE_SOURCE_DIR := $(TARGET_OUT)
 
 # The system partition needs room for the recovery image as well.  We
@@ -802,6 +1254,7 @@ SYSTEMIMAGE_SOURCE_DIR := $(TARGET_OUT)
 # as the source (since they are very similar).  Generate the patch so
 # we can see how big it's going to be, and include that in the system
 # image size check calculation.
+ifneq ($(TARGET_BOARD_PLATFORM),mrst)
 ifneq ($(INSTALLED_RECOVERYIMAGE_TARGET),)
 intermediates := $(call intermediates-dir-for,PACKAGING,recovery_patch)
 RECOVERY_FROM_BOOT_PATCH := $(intermediates)/recovery_from_boot.p
@@ -813,7 +1266,9 @@ $(RECOVERY_FROM_BOOT_PATCH): $(INSTALLED_RECOVERYIMAGE_TARGET) \
 	mkdir -p $(dir $@)
 	PATH=$(HOST_OUT_EXECUTABLES):$$PATH $(HOST_OUT_EXECUTABLES)/imgdiff $(INSTALLED_BOOTIMAGE_TARGET) $(INSTALLED_RECOVERYIMAGE_TARGET) $@
 endif
-
+else
+RECOVERY_FROM_BOOT_PATCH :=
+endif
 
 $(INSTALLED_SYSTEMIMAGE): $(BUILT_SYSTEMIMAGE) $(RECOVERY_FROM_BOOT_PATCH) | $(ACP)
 	@echo "Install system fs image: $@"
@@ -845,8 +1300,17 @@ endif
 system_tar := $(PRODUCT_OUT)/system.tar
 INSTALLED_SYSTEMTARBALL_TARGET := $(system_tar).$(SYSTEM_TARBALL_FORMAT)
 $(INSTALLED_SYSTEMTARBALL_TARGET): PRIVATE_SYSTEM_TAR := $(system_tar)
-$(INSTALLED_SYSTEMTARBALL_TARGET): $(FS_GET_STATS) $(INTERNAL_SYSTEMIMAGE_FILES)
+# Motorola BEGIN - cdv001 - IKSECURITY-71 (add whitelist)
+ifneq ($(TARGET_BOARD_PLATFORM),mrst)
+$(INSTALLED_SYSTEMTARBALL_TARGET): $(FS_GET_STATS) $(INTERNAL_SYSTEMIMAGE_FILES) $(DEFAULT_NIPTUCK_TARGET) $(QE_WHITELIST)
+# Motorola END - cdv001 - IKSECURITY-71
 	$(build-systemtarball-target)
+else
+# Motorola BEGIN - cdv001 - IKSECURITY-71 (add whitelist)
+$(INSTALLED_SYSTEMTARBALL_TARGET): $(FS_GET_STATS) $(INTERNAL_SYSTEMIMAGE_FILES) $(QE_WHITELIST)
+	$(build-systemtarball-target)
+endif
+# Motorola END - cdv001 - IKSECURITY-71
 
 .PHONY: systemtarball-nodeps
 systemtarball-nodeps: $(FS_GET_STATS) \
@@ -891,6 +1355,15 @@ INTERNAL_USERDATAIMAGE_FILES := \
 	$(filter $(TARGET_OUT_DATA)/%,$(ALL_DEFAULT_INSTALLED_MODULES))
 
 ifeq ($(INTERNAL_USERIMAGES_USE_EXT),true)
+ifeq ($(TARGET_USERIMAGES_USE_EXT3),true)
+define build-userdataimage-target
+    $(call pretty,"Target userdata fs image: $(INSTALLED_USERDATAIMAGE_TARGET)")
+    @mkdir -p $(TARGET_OUT_DATA)
+    # MOT GB UPMERGE, A22569, 01/22/2011 / Fix the userdata image oversize issue.
+    $(call build-userimage-ext2-target,$(TARGET_OUT_DATA),$(INSTALLED_USERDATAIMAGE_TARGET),data,journal,)
+    $(hide) $(call assert-max-image-size,$(INSTALLED_USERDATAIMAGE_TARGET),$(BOARD_USERDATAIMAGE_PARTITION_SIZE),yaffs)
+endef
+else
 ## Generate an ext2 image
 define build-userdataimage-target
     $(call pretty,"Target userdata fs image: $(INSTALLED_USERDATAIMAGE_TARGET)")
@@ -898,6 +1371,7 @@ define build-userdataimage-target
     $(call build-userimage-ext-target,$(TARGET_OUT_DATA),$(INSTALLED_USERDATAIMAGE_TARGET),data,$(INTERNAL_USERIMAGES_EXT_VARIANT),$(BOARD_USERDATAIMAGE_PARTITION_SIZE))
     $(hide) $(call assert-max-image-size,$(INSTALLED_USERDATAIMAGE_TARGET),$(BOARD_USERDATAIMAGE_PARTITION_SIZE),yaffs)
 endef
+endif
 
 else # INTERNAL_USERIMAGES_USE_EXT != true
 
@@ -906,11 +1380,16 @@ define build-userdataimage-target
     $(call pretty,"Target userdata fs image: $(INSTALLED_USERDATAIMAGE_TARGET)")
     @mkdir -p $(TARGET_OUT_DATA)
     $(hide) $(MKYAFFS2) -f $(mkyaffs2_extra_flags) $(TARGET_OUT_DATA) $(INSTALLED_USERDATAIMAGE_TARGET)
+    $(hide) chmod a+r $(INSTALLED_USERDATAIMAGE_TARGET)
     $(hide) $(call assert-max-image-size,$(INSTALLED_USERDATAIMAGE_TARGET),$(BOARD_USERDATAIMAGE_PARTITION_SIZE),yaffs)
 endef
 endif # INTERNAL_USERIMAGES_USE_EXT
 
+ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
+BUILT_USERDATAIMAGE_TARGET := $(PRODUCT_OUT)/userdata.img.$(INTERNAL_USERIMAGES_EXT_VARIANT)
+else
 BUILT_USERDATAIMAGE_TARGET := $(PRODUCT_OUT)/userdata.img
+endif
 
 # We just build this directly to the install location.
 INSTALLED_USERDATAIMAGE_TARGET := $(BUILT_USERDATAIMAGE_TARGET)
@@ -1015,13 +1494,13 @@ $(BUILT_TARGET_FILES_PACKAGE): tool_extensions := $(TARGET_DEVICE_DIR)/../common
 else
 $(BUILT_TARGET_FILES_PACKAGE): tool_extensions := $(TARGET_RELEASETOOLS_EXTENSIONS)
 endif
-
 # Depending on the various images guarantees that the underlying
 # directories are up-to-date.
 $(BUILT_TARGET_FILES_PACKAGE): \
 		$(INSTALLED_BOOTIMAGE_TARGET) \
 		$(INSTALLED_RADIOIMAGE_TARGET) \
 		$(INSTALLED_RECOVERYIMAGE_TARGET) \
+		$(INSTALLED_DROIDBOOTIMAGE_TARGET) \
 		$(INSTALLED_SYSTEMIMAGE) \
 		$(INSTALLED_USERDATAIMAGE_TARGET) \
 		$(INSTALLED_ANDROID_INFO_TXT_TARGET) \
@@ -1043,6 +1522,9 @@ ifdef INSTALLED_2NDBOOTLOADER_TARGET
 	$(hide) $(ACP) \
 		$(INSTALLED_2NDBOOTLOADER_TARGET) $(zip_root)/RECOVERY/second
 endif
+ifdef BOARD_RECOVERY_CMDLINE
+	$(hide) echo "$(BOARD_RECOVERY_CMDLINE)" > $(zip_root)/RECOVERY/cmdline
+endif
 ifdef BOARD_KERNEL_CMDLINE
 	$(hide) echo "$(BOARD_KERNEL_CMDLINE)" > $(zip_root)/RECOVERY/cmdline
 endif
@@ -1054,6 +1536,16 @@ ifdef BOARD_KERNEL_PAGESIZE
 endif
 	@# Components of the boot image
 	$(hide) mkdir -p $(zip_root)/BOOT
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+	$(hide) mkdir -p $(zip_root)/RECOVERY/RAMDISK/etc
+	$(hide) $(ACP) $(TARGET_RECOVERY_ROOT_OUT)/etc/recovery.fstab $(zip_root)/RECOVERY/RAMDISK/etc/
+	$(hide) $(ACP) $(PRODUCT_OUT)/recovery.img $(zip_root)/RECOVERY/
+	$(hide) $(ACP) $(PRODUCT_OUT)/boot.bin $(zip_root)/BOOT/
+	$(hide) mkdir -p $(zip_root)/FIRMWARE
+ifeq ($(BOARD_HAVE_MODEM),true)
+	$(hide) $(ACP) $(PRODUCT_OUT)/radio_firmware.bin $(zip_root)/FIRMWARE/
+endif
+endif
 	$(hide) $(call package_files-copy-root, \
 		$(TARGET_ROOT_OUT),$(zip_root)/BOOT/RAMDISK)
 ifdef INSTALLED_KERNEL_TARGET
@@ -1137,6 +1629,7 @@ ifneq ($(recovery_fstab),)
 # -----------------------------------------------------------------
 # OTA update package
 
+ifneq ($(TARGET_BOARD_PLATFORM),mrst)
 name := $(TARGET_PRODUCT)
 ifeq ($(TARGET_BUILD_TYPE),debug)
   name := $(name)_debug
@@ -1144,18 +1637,24 @@ endif
 name := $(name)-ota-$(FILE_NAME_TAG)
 
 INTERNAL_OTA_PACKAGE_TARGET := $(PRODUCT_OUT)/$(name).zip
-
+OTA_FROM_TARGET_FILES ?= ./build/tools/releasetools/ota_from_target_files
 $(INTERNAL_OTA_PACKAGE_TARGET): KEY_CERT_PAIR := $(DEFAULT_KEY_CERT_PAIR)
+
+ifeq ($(TARGET_BOARD_PLATFORM),mrst)
+EXTRA_OTA_PACKAGE_ARGS := --intel_ota --no_prereq
+endif
 
 $(INTERNAL_OTA_PACKAGE_TARGET): $(BUILT_TARGET_FILES_PACKAGE) $(OTATOOLS)
 	@echo "Package OTA: $@"
-	$(hide) ./build/tools/releasetools/ota_from_target_files -v \
+	$(hide) $(OTA_FROM_TARGET_FILES) -v \
 	   -p $(HOST_OUT) \
            -k $(KEY_CERT_PAIR) \
+           $(EXTRA_OTA_PACKAGE_ARGS) \
            $(BUILT_TARGET_FILES_PACKAGE) $@
 
 .PHONY: otapackage
 otapackage: $(INTERNAL_OTA_PACKAGE_TARGET)
+endif
 
 # -----------------------------------------------------------------
 # The update package
@@ -1429,7 +1928,9 @@ $(INTERNAL_SDK_TARGET): $(deps)
 			-I $(PRODUCT_OUT) \
 			-I $(HOST_OUT) \
 			-I $(TARGET_COMMON_OUT_ROOT) \
+			-v "TARGET_OUT_COMMON_INTERMEDIATES=$(TARGET_OUT_COMMON_INTERMEDIATES)" \
 			-v "PLATFORM_NAME=android-$(PLATFORM_VERSION)" \
+			-v "TARGET_OUT_ROOT=$(TARGET_OUT_ROOT)" \
 			-v "OUT_DIR=$(OUT_DIR)" \
 			-v "TARGET_ARCH=$(TARGET_ARCH)" \
 			-v "TARGET_CPU_ABI=$(TARGET_CPU_ABI)" \
@@ -1468,8 +1969,20 @@ $(INTERNAL_FINDBUGS_HTML_TARGET): $(INTERNAL_FINDBUGS_XML_TARGET)
 	$(hide) prebuilt/common/findbugs/bin/convertXmlToText -html:fancy.xsl \
 	$(INTERNAL_FINDBUGS_XML_TARGET)	> $@
 
+# Motorola - START - jnp847 - IKMAPFOUR-813 - 05/13/2010 - Source tree clean up
+#                    mcjw73 -               - 06/25/2010 - Reapply patch
 # -----------------------------------------------------------------
-# Findbugs
+# ADTplugin
+# It expects environment variable ECLIPSE_HOME to be defined.  Better to point to /opt/eclipse
+# Should be a version of Eclipse RCP (must have the WTP & GEF plugins available too.)
+#
+ADTplugin:
+	mkdir -p $(ANDROID_PRODUCT_OUT)/../../../ADT/
+	sdk/eclipse/scripts/build_server.sh -i $(ANDROID_PRODUCT_OUT)/../../../ADT/
+	rm -rf $(ANDROID_PRODUCT_OUT)/../../../eclipse*
+	#. sdk/eclipse/scripts/cleanup.sh
+	echo '############ Target ADTplugin DONE !!!'
+# Motorola - END - jnp847 - IKMAPFOUR-813
 
 # -----------------------------------------------------------------
 # These are some additional build tasks that need to be run.
@@ -1482,3 +1995,20 @@ include $(sort $(wildcard $(BUILD_SYSTEM)/tasks/*.mk))
 ifneq ($(sdk_repo_goal),)
 include $(TOPDIR)development/build/tools/sdk_repo.mk
 endif
+
+# -----------------------------------------------------------------
+# Define publish target for windows tools
+PUBLISH_PATH:= $(TOP)/pub
+PUBLISH_TOOLS_PATH := $(abspath $(PUBLISH_PATH)/tools/)
+PUBLISH_WINDOWS_TOOLS_deps := \
+	$(HOST_OUT_EXECUTABLES)/adb.exe \
+	$(HOST_OUT_EXECUTABLES)/AdbWinUsbApi.dll \
+	$(HOST_OUT_EXECUTABLES)/AdbWinApi.dll \
+	$(HOST_OUT_EXECUTABLES)/fastboot.exe
+publish_windows_tools: $(PUBLISH_WINDOWS_TOOLS_deps)
+	@ echo "Publish windows tools"
+	@ mkdir -p $(PUBLISH_TOOLS_PATH)
+	(cd out/host/ && cp --parents windows-x86/bin/adb.exe $(PUBLISH_TOOLS_PATH))
+	(cd out/host/ && cp --parents windows-x86/bin/AdbWinUsbApi.dll $(PUBLISH_TOOLS_PATH))
+	(cd out/host/ && cp --parents windows-x86/bin/AdbWinApi.dll $(PUBLISH_TOOLS_PATH))
+	(cd out/host/ && cp --parents windows-x86/bin/fastboot.exe $(PUBLISH_TOOLS_PATH))

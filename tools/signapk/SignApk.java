@@ -401,8 +401,18 @@ class SignApk {
         byte[] buffer = new byte[4096];
         int num;
 
-        Map<String, Attributes> entries = manifest.getEntries();
-        List<String> names = new ArrayList(entries.keySet());
+        //Motorola, bhdc87, 9/2/2011, IKSTABLE6-10853
+        List<String> names = new ArrayList();
+        for (Enumeration<JarEntry> e = in.entries(); e.hasMoreElements();) {
+            JarEntry entry = e.nextElement();
+            String name = entry.getName();
+
+            if( !name.equals(JarFile.MANIFEST_NAME) && !name.equals(CERT_SF_NAME)
+                && !name.equals(CERT_RSA_NAME))
+                names.add(name);
+        }
+        //End Motorola, bhdc87, 9/2/2011,IKSTABLE6-10853
+
         Collections.sort(names);
         for (String name : names) {
             JarEntry inEntry = in.getJarEntry(name);

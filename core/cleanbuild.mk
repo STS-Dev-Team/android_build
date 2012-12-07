@@ -13,6 +13,10 @@
 # limitations under the License.
 #
 
+# Motorola  mcjw73  Disable autoclean that is forcing cleans when
+# we don't need them.
+DISABLE_AUTO_INSTALLCLEAN := true
+
 INTERNAL_CLEAN_STEPS :=
 
 # Builds up a list of clean steps.  Creates a unique
@@ -175,6 +179,8 @@ installclean_files := \
 	$(HOST_OUT)/obj/NOTICE_FILES \
 	$(HOST_OUT)/sdk \
 	$(PRODUCT_OUT)/*.img \
+	$(PRODUCT_OUT)/*.bin \
+	$(PRODUCT_OUT)/*.unsigned \
 	$(PRODUCT_OUT)/*.txt \
 	$(PRODUCT_OUT)/*.xlb \
 	$(PRODUCT_OUT)/*.zip \

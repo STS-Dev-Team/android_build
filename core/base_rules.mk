@@ -99,7 +99,7 @@ ifneq ($(filter $(LOCAL_MODULE_TAGS),user),)
     $(warning * PRODUCT_PACKAGES section of)
     $(warning * build/target/product/core.mk)
     $(warning * )
-    $(error user tag detected on new module - user tags are only supported on legacy modules)
+    $(warning user tag detected on new module - user tags are only supported on legacy modules)
   endif
 endif
 
@@ -392,6 +392,12 @@ $(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_INSTALL_DIR := $(dir $(LOCAL_INSTALLED_MO
 $(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_CLASS_INTERMEDIATES_DIR := $(intermediates)/classes
 $(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_SOURCE_INTERMEDIATES_DIR := $(intermediates)/src
 $(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_JAVA_SOURCES := $(all_java_sources)
+
+# Motorola - BEGIN - Frank Liu - 11/11/2009
+$(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_JAVA_SOURCE_PATH := $(LOCAL_JAVA_SOURCE_PATH)
+# Motorola - END - Frank Liu - 11/11/2009
+
+
 $(LOCAL_INTERMEDIATE_TARGETS): PRIVATE_JAVA_OBJECTS := $(patsubst %.java,%.class,$(LOCAL_SRC_FILES))
 ifeq ($(my_prefix),TARGET_)
 ifeq ($(LOCAL_SDK_VERSION),)
@@ -519,18 +525,54 @@ ifndef LOCAL_UNINSTALLABLE_MODULE
   # acp and libraries that it uses can't use acp for
   # installation;  hence, LOCAL_ACP_UNAVAILABLE.
 ifneq ($(LOCAL_ACP_UNAVAILABLE),true)
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+ifeq ($(LOCAL_DEX_WORKAROUND),true)
+built_ext := $(basename $(LOCAL_BUILT_MODULE))-ext.jar
+installed_ext := $(basename $(LOCAL_INSTALLED_MODULE))-ext.jar
+$(installed_ext): $(built_ext) | $(ACP)
+	@echo "Install: $@"
+	$(copy-file-to-new-target)
+
+$(LOCAL_INSTALLED_MODULE): $(installed_ext)
+endif
+# END IKHSS7-2666
 $(LOCAL_INSTALLED_MODULE): $(LOCAL_BUILT_MODULE) | $(ACP)
 	@echo "Install: $@"
 	$(copy-file-to-new-target)
 else
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
+ifeq ($(LOCAL_DEX_WORKAROUND),true)
+built_ext := $(basename $(LOCAL_BUILT_MODULE))-ext.jar
+installed_ext := $(basename $(LOCAL_INSTALLED_MODULE))-ext.jar
+$(installed_ext): $(built_ext)
+	@echo "Install: $@ "
+	$(copy-file-to-target-with-cp)
+
+$(LOCAL_INSTALLED_MODULE): $(installed_ext)
+endif
+# END IKHSS7-2666
 $(LOCAL_INSTALLED_MODULE): $(LOCAL_BUILT_MODULE)
 	@echo "Install: $@"
 	$(copy-file-to-target-with-cp)
 endif
 
+# BEGIN Motorola, a5705c, 01/06/2012, IKHSS7-2666
+# Workaround to split big jar into two jar files
 ifdef LOCAL_DEX_PREOPT
 installed_odex := $(basename $(LOCAL_INSTALLED_MODULE)).odex
 built_odex := $(basename $(LOCAL_BUILT_MODULE)).odex
+ifeq ($(LOCAL_DEX_WORKAROUND),true)
+installed_odex_ext := $(basename $(LOCAL_INSTALLED_MODULE))-ext.odex
+built_odex_ext := $(basename $(LOCAL_BUILT_MODULE))-ext.odex
+$(installed_odex_ext) : $(built_odex_ext) | $(ACP)
+	@echo "Install: $@"
+	$(copy-file-to-target)
+$(LOCAL_INSTALLED_MODULE) : $(installed_odex_ext)
+endif
+# END IKHSS7-2666
+
 $(installed_odex) : $(built_odex) | $(ACP)
 	@echo "Install: $@"
 	$(copy-file-to-target)

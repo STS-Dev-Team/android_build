@@ -108,12 +108,42 @@ do
                 $7 != "CRC-32" ||
                 $8 != "Name")
             {
+                if (NF != "3" ||
+                    $1 != "signed" ||
+                    $2 != "by" ||
+                    $3 != "SignApk")
+                {
                 print "'$PROGNAME': ERROR: Unexpected zip listing format" > \
                         "/dev/stderr";
                 print "'$PROGNAME': ERROR: Line 2 is \"" $0 "\"" > \
                         "/dev/stderr";
                 failed = 1;
                 exit 1;
+                }
+            } else {
+                saw_listing = 1;
+            }
+        }
+        NR == "3" {
+            if (NF != "8" ||
+                $1 != "Length" ||
+                $2 != "Method" ||
+                $3 != "Size" ||
+                ($4 != "Ratio" && $4 != "Cmpr") ||
+                $5 != "Date" ||
+                $6 != "Time" ||
+                $7 != "CRC-32" ||
+                $8 != "Name")
+            {
+                if (!saw_listing)
+                {
+                print "'$PROGNAME': ERROR: Unexpected zip listing format" > \
+                        "/dev/stderr";
+                print "'$PROGNAME': ERROR: Line 3 is \"" $0 "\"" > \
+                        "/dev/stderr";
+                failed = 1;
+                exit 1;
+                }
             } else {
                 saw_listing = 1;
             }

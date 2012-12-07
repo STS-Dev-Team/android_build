@@ -25,6 +25,10 @@ GRANDFATHERED_USER_MODULES :=
 
 -include vendor/google/user_tags.mk
 
+# BEGIN MOTOROLA: IKARCH-548: Include list of Motorola modules with user tags
+-include motorola/build/user_tags.mk
+# END MOTOROLA IKARCH-548
+
 GRANDFATHERED_USER_MODULES += \
 	20-dns.conf \
 	95-configured \
