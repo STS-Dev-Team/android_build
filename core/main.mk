@@ -504,6 +504,7 @@ subdirs := \
 	external/webrtc \
 	external/wpa_supplicant_6 \
 	external/wpa_supplicant_8 \
+	external/wpa_supplicant_8_ti \
 	external/yaffs2 \
 	external/zlib \
 	frameworks/av/camera \
@@ -552,6 +553,8 @@ subdirs += \
 	device/asus \
 	device/lge \
 	device/samsung \
+	device/amazon \
+	device/motorola \
 	vendor/asus \
 	vendor/audience \
 	vendor/broadcom \
@@ -563,6 +566,8 @@ subdirs += \
 	vendor/nxp \
 	vendor/qcom \
 	vendor/samsung \
+	vendor/amazon \
+	vendor/motorola \
 	vendor/widevine
 
 # Ubuntu et. al.

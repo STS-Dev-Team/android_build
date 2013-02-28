@@ -32,7 +32,9 @@ _vendor_owner_whitelist := \
         samsung_arm \
         ti \
         trusted_logic \
-        widevine
+        widevine \
+        amazon \
+        motorola
 
 
 ifneq (,$(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_RESTRICT_VENDOR_FILES))
