@@ -472,6 +472,7 @@ subdirs := \
 	build/tools/zipalign \
 	development/tools/emulator/opengl \
 	external/aac \
+	external/bluetooth/bluedroid \
 	external/bouncycastle \
 	external/bsdiff \
 	external/busybox \
