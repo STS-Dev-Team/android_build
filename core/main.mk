@@ -536,6 +536,7 @@ subdirs := \
 	frameworks/native/services \
 	frameworks/opt/emoji \
 	hardware \
+	libnativehelper \
 	system/core \
 	system/extras/ext4_utils \
 	system/media/audio_utils \
