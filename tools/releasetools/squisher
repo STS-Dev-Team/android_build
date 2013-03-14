@@ -4,7 +4,7 @@
 # thanks to cyanogen
 #
 
-. $ANDROID_BUILD_TOP/vendor/motorola/omap4-common/tools/functions
+. $ANDROID_BUILD_TOP/build/tools/releasetools/functions
 
 OUT_TARGET_HOST=`uname -a | grep Darwin`
 if [ -z "$OUT_TARGET_HOST" ]
