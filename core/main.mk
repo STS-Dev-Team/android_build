@@ -486,11 +486,15 @@ subdirs := \
 	external/giflib \
 	external/gtest \
 	external/icu4c \
+	external/ipsec-tools \
+	external/iproute2 \
+	external/iptables \
 	external/jhead \
 	external/jpeg \
 	external/liblzf \
 	external/libpng \
 	external/libvpx \
+	external/mdnsresponder \
 	external/mksh \
 	external/openssl \
 	external/protobuf \
@@ -538,10 +542,12 @@ subdirs := \
 	frameworks/opt/emoji \
 	hardware \
 	libnativehelper \
+	system/bluetooth \
 	system/core \
 	system/extras/ext4_utils \
 	system/media/audio_utils \
 	system/media/camera \
+	system/netd \
 	system/su
 
 # Keystore only on manta
