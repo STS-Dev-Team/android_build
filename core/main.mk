@@ -477,6 +477,7 @@ subdirs := \
 	external/bsdiff \
 	external/busybox \
 	external/bzip2 \
+	external/chromium \
 	external/e2fsprogs \
 	external/expat \
 	external/flac \
@@ -544,6 +545,7 @@ subdirs := \
 	libnativehelper \
 	system/bluetooth \
 	system/core \
+	system/bluetooth \
 	system/extras/ext4_utils \
 	system/media/audio_utils \
 	system/media/camera \
