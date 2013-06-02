@@ -2,9 +2,8 @@
 # Portions Copyright (C) 2012 VMware, Inc. All Rights Reserved.
 
 OUT=$1
-SIGNAPK=$2
 
-if [ -z "$OUT" -o -z "$SIGNAPK" ]
+if [ -z "$OUT" ]
 then
     echo "Android build environment not detected."
     exit 1
@@ -87,8 +86,7 @@ echo 'run_program("/sbin/busybox", "sh", "-c", "/sbin/killrecovery.sh");' >> $UP
 rm -f $UTILITIES_DIR/unsigned.zip
 rm -f $UTILITIES_DIR/update.zip
 echo zip -ry $UTILITIES_DIR/unsigned.zip . -x $SYMLINKS '*\[*' '*\[\[*'
-zip -ry $UTILITIES_DIR/unsigned.zip . -x $SYMLINKS '*\[*' '*\[\[*'
-java -jar $SIGNAPK -w $ANDROID_BUILD_TOP/build/target/product/security/testkey.x509.pem $ANDROID_BUILD_TOP/build/target/product/security/testkey.pk8 $UTILITIES_DIR/unsigned.zip $UTILITIES_DIR/update.zip
+zip -ry $UTILITIES_DIR/update.zip . -x $SYMLINKS '*\[*' '*\[\[*'
 
 echo Recovery FakeFlash is now available at $OUT/utilities/update.zip
 popd > /dev/null 2> /dev/null

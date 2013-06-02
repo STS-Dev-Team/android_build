@@ -468,7 +468,6 @@ subdirs := \
 	build/tools/acp \
 	build/tools/check_prereq \
 	build/tools/fs_config \
-	build/tools/signapk \
 	build/tools/zipalign \
 	development/tools/emulator/opengl \
 	external/aac \

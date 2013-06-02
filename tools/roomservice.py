@@ -23,6 +23,12 @@ from xml.etree import ElementTree
 
 product = sys.argv[1];
 
+phablet = {'branch': 'phablet-10.1',
+           'fallback_branch': 'cm-10.1',
+           'remote': 'phablet',
+           'url_template': 'http://phablet.ubuntu.com/gitweb?p=CyanogenMod/%s.git;a=heads',
+           }
+
 if len(sys.argv) > 2:
     depsonly = sys.argv[2]
 else:
@@ -63,6 +69,9 @@ while not depsonly:
         repositories.append(res)
     page = page + 1
 
+local_manifests = r'.repo/local_manifests'
+if not os.path.exists(local_manifests): os.makedirs(local_manifests)
+
 def exists_in_tree(lm, repository):
     for child in lm.getchildren():
         if child.attrib['name'].endswith(repository):
@@ -93,7 +102,7 @@ def get_default_revision():
 
 def get_from_manifest(devicename):
     try:
-        lm = ElementTree.parse(".repo/local_manifest.xml")
+        lm = ElementTree.parse(".repo/local_manifests/roomservice.xml")
         lm = lm.getroot()
     except:
         lm = ElementTree.Element("manifest")
@@ -117,7 +126,7 @@ def get_from_manifest(devicename):
 
 def is_in_manifest(projectname):
     try:
-        lm = ElementTree.parse(".repo/local_manifest.xml")
+        lm = ElementTree.parse(".repo/local_manifests/roomservice.xml")
         lm = lm.getroot()
     except:
         lm = ElementTree.Element("manifest")
@@ -130,7 +139,7 @@ def is_in_manifest(projectname):
 
 def add_to_manifest(repositories):
     try:
-        lm = ElementTree.parse(".repo/local_manifest.xml")
+        lm = ElementTree.parse(".repo/local_manifests/roomservice.xml")
         lm = lm.getroot()
     except:
         lm = ElementTree.Element("manifest")
@@ -147,7 +156,11 @@ def add_to_manifest(repositories):
             "remote": "github", "name": "CyanogenMod/%s" % repo_name })
 
         if 'branch' in repository:
-            project.set('revision',repository['branch'])
+            project.set('revision', repository['branch'])
+            if repository['branch'] == phablet['branch']:
+                project.set('remote', phablet['remote'])
+        else:
+            project.set('revision', phablet['fallback_branch'])
 
         lm.append(project)
 
@@ -155,7 +168,7 @@ def add_to_manifest(repositories):
     raw_xml = ElementTree.tostring(lm)
     raw_xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + raw_xml
 
-    f = open('.repo/local_manifest.xml', 'w')
+    f = open('.repo/local_manifests/roomservice.xml', 'w')
     f.write(raw_xml)
     f.close()
 
@@ -185,6 +198,29 @@ def fetch_dependencies(repo_path):
     if len(syncable_repos) > 0:
         print 'Syncing dependencies'
         os.system('repo sync %s' % ' '.join(syncable_repos))
+
+def phablet_has_branch(repository, revision):
+    print "Searching for repository on phablet.ubuntu.com"
+    phablet_url = phablet['url_template'] % repository
+    try:
+        request = urllib2.urlopen(phablet_url).read()
+        heads_html = filter(lambda x: '<a class="list name"' in x,
+                            request.split('\n'))
+        heads = [ re.sub('<[^>]*>', '', i) for i in heads_html ]
+        print "Found heads:"
+        for head in heads:
+            print head
+        if revision in heads:
+            return True
+        else:
+            return False
+    except urllib2.HTTPError as e:
+        if e.code == 404:
+            print "Repository not found on phablet.ubuntu.com"
+            print "This may likely be an unsupported build target"
+            return False
+        else:
+            raise e
 
 def has_branch(branches, revision):
     return revision in [branch['name'] for branch in branches]
@@ -216,7 +252,10 @@ else:
             repo_path = "device/%s/%s" % (manufacturer, device)
             adding = {'repository':repo_name,'target_path':repo_path}
             
-            if not has_branch(result, default_revision):
+            if phablet_has_branch(repository['name'], default_revision):
+                print 'Found on phablet'
+                adding['branch'] = default_revision
+            elif not has_branch(result, default_revision):
                 found = False
                 if os.getenv('ROOMSERVICE_BRANCHES'):
                     fallbacks = filter(bool, os.getenv('ROOMSERVICE_BRANCHES').split(' '))
@@ -226,6 +265,14 @@ else:
                             found = True
                             adding['branch'] = fallback
                             break
+
+                # Adding specifically for phablet
+                if has_branch(result, phablet['fallback_branch']):
+                    print "Using %s as a fallback for %s" % \
+                           (phablet['fallback_branch'], phablet['branch'])
+                    found = True
+                    adding['branch'] = phablet['fallback_branch']
+                    default_revision = phablet['fallback_branch']
                             
                 if not found:
                     print "Default revision %s not found in %s. Bailing." % (default_revision, repo_name)
@@ -245,4 +292,4 @@ else:
             print "Done"
             sys.exit()
 
-print "Repository for %s not found in the CyanogenMod Github repository list. If this is in error, you may need to manually add it to your local_manifest.xml." % device
+print "Repository for %s not found in the CyanogenMod Github repository list. If this is in error, you may need to manually add it to your local_manifests/roomservice.xml." % device
