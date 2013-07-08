@@ -278,8 +278,3 @@ class EdifyGenerator(object):
       data = open(os.path.join(input_path, "updater")).read()
     common.ZipWriteStr(output_zip, "META-INF/com/google/android/update-binary",
                        data, perms=0755)
-
-  def UpdateUbuntuSession(self):
-    self.script.append('package_extract_file("system/etc/ubuntu-session", "/data/ubuntu/usr/bin/ubuntu-session");')
-    self.script.append('set_perm(0, 0, 0755, "/data/ubuntu/usr/bin/ubuntu-session");')
-
