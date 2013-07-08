@@ -542,7 +542,8 @@ subdirs := \
 	frameworks/opt/emoji \
 	hardware \
 	libnativehelper \
-	system/bluetooth \
+	prebuilts/tools/linux-x86/sdl \
+	sdk/emulator \
 	system/core \
 	system/bluetooth \
 	system/extras/ext4_utils \
@@ -555,6 +556,11 @@ subdirs := \
 ifeq ($(TARGET_PRODUCT), cm_manta)
 subdirs += \
 	system/security/keystore
+endif
+
+ifeq ($(TARGET_PRODUCT), cm_goldfish)
+subdirs += \
+	external/qemu
 endif
 
 # device and vendor

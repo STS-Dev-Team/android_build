@@ -154,13 +154,17 @@ function setpaths()
     if [ -d "$gccprebuiltdir/$toolchaindir" ]; then
         export ANDROID_EABI_TOOLCHAIN=$gccprebuiltdir/$toolchaindir
     fi
-    # Also check for the Linaro GCC 4.7.2 and use it as default if available
+    # Also check for system wide GCC or Linaro GCC 4.7.2 and use it as default if available
     if [ "$ARCH" == "arm" ];
     then
-        toolchaindir=arm/linaro-4.7.2/bin
-        if [ -d "$gccprebuiltdir/$toolchaindir" ]; then
-            export ANDROID_EABI_TOOLCHAIN=$gccprebuiltdir/$toolchaindir
-        fi
+	if [ -x /usr/bin/arm-linux-androideabi-gcc ]; then
+	    export ANDROID_EABI_TOOLCHAIN=/usr/bin
+	else
+            toolchaindir=arm/linaro-4.7.2/bin
+            if [ -d "$gccprebuiltdir/$toolchaindir" ]; then
+		export ANDROID_EABI_TOOLCHAIN=$gccprebuiltdir/$toolchaindir
+            fi
+	fi
     fi
 
     unset ARM_EABI_TOOLCHAIN ARM_EABI_TOOLCHAIN_PATH
@@ -178,14 +182,19 @@ function setpaths()
             # No need to set ARM_EABI_TOOLCHAIN for other ARCHs
             ;;
     esac
-    # Also check for the Linaro GCC 4.7.2 and use it as default if available
+    # Also check for system wide GCC or Linaro GCC 4.7.2 and use it as default if available
     if [ "$ARCH" == "arm" ];
     then
-        toolchaindir=arm/linaro-4.7.2/bin
-        if [ -d "$gccprebuiltdir/$toolchaindir" ]; then
-            export ARM_EABI_TOOLCHAIN="$gccprebuiltdir/$toolchaindir"
-            ARM_EABI_TOOLCHAIN_PATH=":$gccprebuiltdir/$toolchaindir"
-        fi
+	if [ -x /usr/bin/arm-linux-androideabi-gcc ]; then
+	    export ANDROID_EABI_TOOLCHAIN=/usr/bin
+	    ARM_EABI_TOOLCHAIN_PATH=":/usr/bin"
+	else
+            toolchaindir=arm/linaro-4.7.2/bin
+            if [ -d "$gccprebuiltdir/$toolchaindir" ]; then
+		export ARM_EABI_TOOLCHAIN="$gccprebuiltdir/$toolchaindir"
+		ARM_EABI_TOOLCHAIN_PATH=":$gccprebuiltdir/$toolchaindir"
+            fi
+	fi
     fi
 
     export ANDROID_TOOLCHAIN=$ANDROID_EABI_TOOLCHAIN
@@ -1831,6 +1840,28 @@ function set_java_home() {
     fi
 }
 
+function get_hybris() {
+    HYBRIS_SRC=ubuntu/hybris
+    HYBRIS_SRC_PACKAGE=libhybris
+    HYBRIS_SRC_SERIES=saucy
+
+    # Can't exit while sourcing.
+    if [ -z $(which pull-lp-source) ]; then
+        echo "*************************************************"
+        echo "Please apt-get install ubuntu-dev-tools and rerun"
+        echo "or build will be incomplete"
+        echo "*************************************************"
+    fi
+
+    if [ -d $HYBRIS_SRC ]; then
+        rm -rf $HYBRIS_SRC
+    fi
+    pull-lp-source $HYBRIS_SRC_PACKAGE $HYBRIS_SRC_SERIES
+    rm ${HYBRIS_SRC_PACKAGE}*.tar.gz ${HYBRIS_SRC_PACKAGE}*.dsc
+    mv ${HYBRIS_SRC_PACKAGE}* $HYBRIS_SRC
+    rm -rf $HYBRIS_SRC/.pc
+}
+
 if [ "x$SHELL" != "x/bin/bash" ]; then
     case `ps -o command -p $$` in
         *bash*)
@@ -1849,5 +1880,7 @@ do
     . $f
 done
 unset f
+
+get_hybris
 
 addcompletions
