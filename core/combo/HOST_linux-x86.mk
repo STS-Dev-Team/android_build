@@ -32,7 +32,7 @@ endef
 # which is loaded by the 64-bit JVM through JNI), will have to use
 # LOCAL_CC and LOCAL_CXX to override this.
 #
-HOST_SDK_TOOLCHAIN_PREFIX := prebuilts/tools/gcc-sdk
+HOST_SDK_TOOLCHAIN_PREFIX := /usr/bin
 # Don't do anything if the toolchain is not there
 ifneq (,$(strip $(wildcard $(HOST_SDK_TOOLCHAIN_PREFIX)/gcc)))
 HOST_CC  := $(HOST_SDK_TOOLCHAIN_PREFIX)/gcc

@@ -134,6 +134,7 @@ PRODUCT_PACKAGES += \
     libis_compat_layer \
     libmedia_compat_layer \
     libsf_compat_layer \
+    libui_compat_layer \
     libubuntu_application_api \
     ubuntuappmanager \
     ubuntu_chroot \
